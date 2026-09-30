@@ -1,0 +1,7 @@
+# Finales de línea LF en el repo y en la copia de trabajo, sin importar core.autocrlf
+# (el Dockerfile, los scripts y el código también corren en Linux).
+* text=auto eol=lf
+
+*.pdf binary
+*.der binary
+*.crl binary
