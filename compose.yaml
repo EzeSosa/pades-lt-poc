@@ -1,0 +1,16 @@
+services:
+  pades:
+    build: .
+    image: pades-lt-poc
+    ports:
+      - "8000:8000"
+    environment:
+      # Si cambiás el host/puerto publicado, ajustalo acá y borrá el volumen
+      # (docker compose down -v) para regenerar la PKI con las URLs nuevas.
+      PUBLIC_BASE_URL: http://127.0.0.1:8000
+    volumes:
+      - pki-data:/data
+    restart: unless-stopped
+
+volumes:
+  pki-data:
