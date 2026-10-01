@@ -152,6 +152,10 @@ Lista firmada por la CA con los números de serie revocados y la fecha de revoca
 - **nextUpdate**: hasta cuándo se considera vigente. Pasada esa fecha, un validador estricto no la acepta.
 - **CRLNumber**: número creciente que identifica la versión.
 
+Cada entrada puede llevar además el **motivo** (`reasonCode`): clave comprometida, cese de actividad, reemplazo, etc.
+
+**Cómo se lee**: la CRL responde *por omisión*. Si el serial **no aparece**, el certificado no estaba revocado a la fecha `thisUpdate`. Nunca lista los certificados válidos, sólo los revocados, y se descarga entera aunque interese uno solo.
+
 Ventaja: se puede cachear y distribuir. Desventaja: crece con cada revocación y su frescura depende de `nextUpdate`.
 
 > En el código: `build_crl()` en [pki.py](../src/pades_lt_poc/pki.py) genera una CRL **nueva en cada request**, con validez de 1 día y `CRLNumber` igual al timestamp Unix. Se sirve en DER (`application/pkix-crl`) en `GET /pki/{root|intermediate}.crl`.
@@ -161,6 +165,8 @@ Ventaja: se puede cachear y distribuir. Desventaja: crece con cada revocación y
 Protocolo (RFC 6960) para preguntar el estado de **un** certificado puntual. El cliente manda un pedido con el `CertID` y el respondedor devuelve una respuesta firmada con uno de tres estados: `good`, `revoked` o `unknown`.
 
 - **CertID**: identifica al certificado consultado mediante el algoritmo de hash, el `issuerNameHash`, el `issuerKeyHash` (hash de la clave pública del emisor) y el número de serie.
+- **certStatus**: `good` (no está revocado), `revoked` (con fecha y motivo) o `unknown` (el respondedor no conoce ese certificado). Ojo: `good` **no significa "certificado válido"**, sólo "no figura como revocado". El vencimiento, la cadena y el uso permitido se verifican aparte.
+- **producedAt**: cuándo se generó la respuesta.
 - **thisUpdate / nextUpdate**: ventana de validez de la respuesta. En la PoC: desde 1 minuto antes hasta 12 horas después.
 - **Nonce**: valor aleatorio que el cliente pone en el pedido y el respondedor devuelve, para evitar que alguien reenvíe (*replay*) una respuesta vieja. La PoC lo copia si viene.
 - **Estado de respuesta**: además del estado del certificado, la respuesta tiene un estado global: `successful`, `malformedRequest`, `unauthorized`, etc. La PoC devuelve `malformedRequest` si no puede parsear el pedido y `unauthorized` si le preguntan por un certificado que no es el firmante ni la TSA, o si el `issuerKeyHash` no coincide con la intermedia.
@@ -181,6 +187,58 @@ Protocolo (RFC 6960) para preguntar el estado de **un** certificado puntual. El 
 | Respondedor OCSP | No se verifica (`ocsp-nocheck`).                |
 
 Esto está hecho a propósito para que el DSS termine teniendo **ambos tipos** de información de revocación.
+
+### Respuestas embebidas: evidencia que se autentica sola
+
+Una CRL y una respuesta OCSP son **documentos firmados** por la CA (o por su respondedor delegado). Una vez descargados no hace falta volver a consultar a la CA: cualquiera puede comprobar después, **offline**, que la respuesta es auténtica y no fue alterada, porque su firma encadena hasta la raíz.
+
+Funcionan como un **certificado de libre deuda**: la CA declara y firma "a tal fecha, este certificado no está revocado". Ese papel se archiva junto al documento y se puede presentar años después, aunque la CA haya apagado su servidor OCSP o ya no exista. Por eso se pueden guardar dentro del PDF:
+
+- en el **DSS** (`/OCSPs` y `/CRLs`), en una actualización incremental posterior a la firma. Es lo que hace B-LT y lo que hace esta PoC.
+- en el atributo firmado **`adbe-revocationInfoArchival`** del CMS: la forma más antigua que usaba Adobe. Como queda bajo la firma, hay que obtener la información **antes** de firmar.
+
+Al validar, el verificador no consulta la red. Comprueba:
+
+1. **Autenticidad**: la firma de la respuesta encadena a la CA (o a un respondedor delegado autorizado por ella).
+2. **Correspondencia**: la respuesta es sobre **este** certificado (serial, y en OCSP también los hashes del emisor del `CertID`).
+3. **Tiempo**: la respuesta es **posterior al momento de la firma** y dice que el certificado no estaba revocado.
+
+El punto 3 necesita conocer **con certeza** el momento de la firma, y eso lo da el sello de tiempo (B-T). Sin sello, la respuesta prueba el estado a la fecha de la respuesta, pero no se puede atar a cuándo se firmó. Por eso B-LT exige B-T: los niveles son acumulativos.
+
+### ¿Para qué una CRL si hay OCSP?
+
+Es cierto que OCSP suele usarse primero y la CRL como *fallback* cuando el respondedor no responde. Pero en el DSS no se incluyen "por las dudas": B-LT exige información de revocación de **cada** certificado de la cadena salvo el ancla de confianza, y OCSP y CRL suelen cubrir **certificados distintos**:
+
+- **Certificados finales** (firmante, TSA): los cubre el **OCSP** de la CA emisora. Es rápido y puntual, y hay muchos certificados por consultar.
+- **CAs intermedias**: las cubre la **CRL de la raíz**. La raíz casi nunca opera un respondedor OCSP: suele estar *offline* y sólo se enciende para emitir CAs y firmar su CRL, que se publica con validez larga.
+
+Así, una firma de una PKI típica de dos niveles termina con OCSP para la hoja **y** CRL para la intermedia. Es lo que pasa en la PoC (2 respuestas OCSP y 1 CRL, ver la tabla de arriba), y también en la PKI argentina: la AC Raíz publica CRL para las CAs que emite, y la CA de la ONTI ofrece OCSP y CRL para los certificados de usuario.
+
+Para un **mismo** certificado alcanza con uno de los dos. Embeber ambos es redundante aunque no está prohibido: puede servir si se teme que algún validador rechace la respuesta OCSP (por ejemplo, por cómo está emitido el certificado del respondedor).
+
+### ¿Quién firma cada respuesta?
+
+- **CRL**: la firma la **misma CA que emitió los certificados que lista**. La CRL de la raíz la firma la raíz; la de la intermedia, la intermedia. (RFC 5280 admite *CRLs indirectas*, firmadas por otra entidad indicada en `cRLIssuer`, pero son raras.)
+- **OCSP**: según RFC 6960 §4.2.2.2, la respuesta puede firmarla:
+  1. la propia **CA emisora** del certificado consultado;
+  2. un **respondedor delegado**: un certificado emitido por esa CA con EKU `OCSPSigning`, que suele venir embebido en la respuesta;
+  3. un respondedor en el que el verificador confía por configuración local (poco común).
+
+El esquema habitual es el delegado: la clave de la CA queda protegida y se usa poco (emitir certificados y firmar la CRL), mientras que el respondedor, que está en línea contestando miles de consultas, usa otra clave de vida corta. Si se comprometiera, el daño se limita a respuestas OCSP y la CA sólo tiene que emitir otro respondedor. Con `ocsp-nocheck` el verificador no consulta la revocación del propio respondedor.
+
+#### Caso real: PKI de firma digital de Argentina
+
+Consultado el 30/09/2026 con un certificado de Ciudadano Digital (CiDi, Córdoba), cuya cadena es CiDi → *Autoridad Certificante de Firma Digital* (ONTI) → *AC Raíz*:
+
+| Certificado consultado | Mecanismo                                         | Firmado por                                                                                                                 | Observaciones                                                     |
+|------------------------|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------|
+| CA de la ONTI          | CRL `http://acraiz.cdp1.gov.ar/ca.crl` (y `cdp2`) | AC Raíz (SHA-1)                                                                                                             | Validez de 6 meses, 3 revocados. La ONTI no tiene OCSP.           |
+| Firmante CiDi          | OCSP `http://pki.jgm.gov.ar/ocsp`                 | Respondedor delegado `CN=ANPKIWFES001V.NACPKIN.AR`, emitido por la ONTI, con EKU `OCSPSigning` y `ocsp-nocheck`, embebido en la respuesta | Es el mismo esquema que el "PoC OCSP Responder" de esta PoC.       |
+| Firmante CiDi          | CRL `http://pki.jgm.gov.ar/crl/FD.crl`            | CA de la ONTI                                                                                                               | Validez de 1 día, unas 240.000 entradas: de ahí que se prefiera OCSP. |
+
+Los números confirman lo de la sección anterior: la raíz, *offline*, publica una CRL chica y de larga duración; la CA operativa publica una CRL enorme y diaria, y ofrece OCSP para no obligar a descargarla.
+
+> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). Un upgrade a LT de firmas de esta PKI necesitaría además relajar la política de algoritmos débiles del validador de pyHanko, e incluir en el DSS el certificado del respondedor OCSP.
 
 ### Hard-fail y soft-fail
 
