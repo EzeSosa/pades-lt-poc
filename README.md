@@ -40,6 +40,14 @@ uv run python scripts/demo.py        # firma out/documento.pdf y lo verifica
 uv run python scripts/demo.py --lta  # idem, en B-LTA
 ```
 
+## Tests
+
+```powershell
+uv run pytest
+```
+
+Los tests generan su propia PKI en una carpeta temporal (no tocan `./pki`) y firman los PDFs en el mismo proceso con la TSA de la app, así que no hace falta tener el server levantado.
+
 ## Docker
 
 ```powershell
