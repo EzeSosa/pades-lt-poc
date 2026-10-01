@@ -122,6 +122,29 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 > En el código: `app.state.root` es el **único** ancla de confianza, tanto al firmar como al verificar. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
+### Rotación de la raíz
+
+Que la raíz sea el ancla de confianza no la hace eterna. Su confianza no se deriva de otra firma (su autofirma es una convención de formato), sino de que alguien decidió **distribuirla e instalarla** como confiable. Y se rota, por varios motivos:
+
+- **Vencimiento**: las raíces duran mucho (20 a 25 años), pero no para siempre. La *AC Raíz* de Argentina vigente al escribir esto es válida del **22/11/2007 al 17/11/2027**.
+- **Algoritmos que envejecen**: una raíz de 2007 nació con SHA-1 y RSA. Rotarla es la única forma de migrar a SHA-256, a curvas elípticas o, más adelante, a algoritmos poscuánticos. Es lo que se ve en la PKI argentina: `cryptography` ya no verifica sus firmas SHA-1 (ver sección 4).
+- **Riesgo acumulado sobre la clave**: cuantos más años en uso, más oportunidades de que se filtre.
+- **Cambios de política u organización**: quién opera la PKI, qué perfiles usa o qué exige la normativa.
+
+**Cómo se rota sin romper nada:**
+
+1. Se genera la raíz nueva **con años de anticipación** y se distribuye a los almacenes de confianza (sistemas operativos, navegadores, Adobe, validadores).
+2. **Certificación cruzada**: la raíz vieja firma un certificado para la clave de la nueva, y a veces también al revés (*oldWithNew* / *newWithOld*, RFC 4210). Así, durante la transición, quien sólo confía en una puede llegar a la otra.
+3. Las CAs operativas (en el caso argentino, la de la ONTI) se **reemiten** bajo la raíz nueva, y los certificados nuevos salen bajo esa cadena.
+4. La raíz vieja **se conserva** en los almacenes para seguir validando lo firmado con ella.
+
+**Qué pasa con las firmas viejas**: el vencimiento de la raíz no invalida automáticamente lo firmado antes, si se cumplen dos condiciones:
+
+- **El validador conserva la raíz vieja.** Para RFC 5280 un ancla de confianza es un nombre y una clave pública, y su vencimiento no forma parte de la validación del camino. Muchos validadores lo ignoran, aunque otros no.
+- **Se puede probar que se firmó cuando todo era válido.** Eso lo dan el sello de tiempo (B-T) y su renovación (B-LTA). Sin sello, el validador evalúa la firma a la fecha actual, con la cadena ya vencida.
+
+Es una razón más por la que una firma B-B, sin sello ni DSS, es frágil a largo plazo: cuando venza la raíz sólo se podrá validar si el validador acepta evaluarla en una fecha pasada que nadie certificó.
+
 ### Extensiones usadas en la PoC
 
 | Extensión | Qué indica | Dónde se usa |
