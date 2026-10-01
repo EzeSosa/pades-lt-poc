@@ -16,12 +16,14 @@ os.environ["PKI_DIR"] = _PKI_DIR
 from io import BytesIO  # noqa: E402
 
 import pytest  # noqa: E402
+import requests  # noqa: E402
 from demo import minimal_pdf  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter  # noqa: E402
 from pyhanko.sign import fields, signers  # noqa: E402
 from pyhanko.sign.signers.pdf_signer import PdfTimeStamper  # noqa: E402
 
+from pades_lt_poc import app as app_module  # noqa: E402
 from pades_lt_poc import pki  # noqa: E402
 from pades_lt_poc.app import app  # noqa: E402
 
@@ -39,6 +41,16 @@ def client():
 @pytest.fixture(scope="session")
 def timestamper(client):
     return client.app.state.tsa_engine
+
+
+@pytest.fixture(autouse=True)
+def no_aia_network(monkeypatch):
+    """Sin red: las descargas AIA fallan salvo que el test instale su propio `_http_get`."""
+
+    def offline(url: str) -> bytes:
+        raise requests.ConnectionError(f"sin red en los tests: {url}")
+
+    monkeypatch.setattr(app_module, "_http_get", offline)
 
 
 @pytest.fixture

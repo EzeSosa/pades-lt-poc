@@ -2,12 +2,18 @@
 
 import base64
 import datetime as dt
+from collections import Counter
 from io import BytesIO
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
 
 from conftest import doc_timestamp, load_signer, sign
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 from pyhanko.keys import (
     load_cert_from_pemder,
@@ -20,12 +26,15 @@ from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.generic_cms import extract_tst_data_iter
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
+from pades_lt_poc import app as app_module
 from pades_lt_poc import pki
-from pades_lt_poc.app import _extract_chain
+from pades_lt_poc.app import _extract_chain, _issued_by, _parse_certs
+
+DATA = Path(__file__).parent / "data"
 
 
-def extract(client, pdf: bytes) -> list[dict]:
-    r = client.post("/certificates", files={"pdf": ("doc.pdf", pdf, "application/pdf")})
+def extract(client, pdf: bytes, **form) -> list[dict]:
+    r = client.post("/certificates", files={"pdf": ("doc.pdf", pdf, "application/pdf")}, data=form)
     assert r.status_code == 200, r.text
     return r.json()["signatures"]
 
@@ -35,7 +44,7 @@ def der_b64(name: str) -> str:
     return base64.b64encode(pki.entity(name).cert().public_bytes(serialization.Encoding.DER)).decode()
 
 
-def assert_chain(entry: dict, names: list[str]) -> None:
+def assert_chain(entry: dict, names: list[str], sources: list[str] | None = None) -> None:
     """La cadena es exactamente `names` (hoja -> raíz) y cada cert está bien clasificado."""
     assert entry["crypto_valid"] is True
     assert entry["chain_complete"] is (names[-1] == pki.ROOT)
@@ -46,6 +55,8 @@ def assert_chain(entry: dict, names: list[str]) -> None:
         assert cert["type"] == expected_type
         assert cert["self_signed"] is (name == pki.ROOT)
         assert cert["subject"] == pki.entity(name).cert().subject.rfc4514_string()
+    if sources is not None:
+        assert [c["source"] for c in certs] == sources
 
 
 def tamper(data: bytes, old: bytes, new: bytes) -> bytes:
@@ -59,7 +70,7 @@ def test_signature_returns_signer_and_tsa_chains(client, pdf, timestamper):
 
     assert entry["field"] == "Firma1"
     assert entry["type"] == "Signature"
-    assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT])
+    assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT], ["cms", "cms", "cms"])
 
     ts = entry["signature_timestamp"]
     assert_chain(ts, [pki.TSA, pki.INTERMEDIATE, pki.ROOT])
@@ -137,11 +148,51 @@ def test_self_signed_signer_from_untrusted_pki(client, pdf):
     assert only["subject"] == "CN=Firmante Autofirmado"
 
 
-def test_incomplete_chain(client, pdf):
-    """Sin la intermedia ni la raíz en el PDF, la cadena queda en la hoja."""
+def test_incomplete_chain_without_fetching(client, pdf):
+    """Sin la intermedia ni la raíz en el PDF y sin AIA, la cadena queda en la hoja."""
+    [entry] = extract(client, sign(pdf, load_signer(chain=())), fetch_missing="false")
+    assert_chain(entry, [pki.SIGNER])
+    assert entry["chain_complete"] is False
+    assert "aia_errors" not in entry
+
+
+def test_incomplete_chain_when_aia_unreachable(client, pdf):
     [entry] = extract(client, sign(pdf, load_signer(chain=())))
     assert_chain(entry, [pki.SIGNER])
     assert entry["chain_complete"] is False
+    [error] = entry["aia_errors"]
+    assert pki.cert_url(pki.INTERMEDIATE) in error
+
+
+@pytest.fixture
+def aia_via_app(client, monkeypatch) -> Counter:
+    """Las URLs AIA de la PKI de prueba se sirven con la propia app; cuenta las descargas."""
+    calls: Counter = Counter()
+
+    def get(url: str) -> bytes:
+        calls[url] += 1
+        r = client.get(urlsplit(url).path)
+        r.raise_for_status()
+        return r.content
+
+    monkeypatch.setattr(app_module, "_http_get", get)
+    return calls
+
+
+def test_chain_completed_from_aia(client, pdf, aia_via_app):
+    """Si el PDF no trae la cadena, se descarga desde AIA caIssuers, eslabón por eslabón."""
+    signed = sign(sign(pdf, load_signer(chain=())), load_signer(chain=()))
+    for entry in extract(client, signed):
+        assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT], ["cms", "aia", "aia"])
+        assert "aia_errors" not in entry
+    # Con caché por request: cada URL se descarga una sola vez para las dos firmas.
+    assert aia_via_app == {pki.cert_url(pki.INTERMEDIATE): 1, pki.cert_url(pki.ROOT): 1}
+
+
+def test_pdf_certs_take_precedence_over_aia(client, pdf, aia_via_app):
+    [entry] = extract(client, sign(pdf, load_signer()))
+    assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT], ["cms", "cms", "cms"])
+    assert not aia_via_app
 
 
 def test_chain_completed_from_dss(client, pdf):
@@ -152,7 +203,32 @@ def test_chain_completed_from_dss(client, pdf):
     DocumentSecurityStore.add_dss(signed, sig.pkcs7_content, certs=ca_certs)
 
     [entry] = extract(client, signed.getvalue())
-    assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT])
+    assert_chain(entry, [pki.SIGNER, pki.INTERMEDIATE, pki.ROOT], ["cms", "dss", "dss"])
+
+
+# --------------------------------------------------------------------------- piezas sueltas
+def test_parse_certs_accepts_der_pem_and_pkcs7(client):  # client: genera la PKI
+    certs = [pki.entity(n).cert() for n in (pki.INTERMEDIATE, pki.ROOT)]
+    Enc = serialization.Encoding
+    assert _parse_certs(certs[0].public_bytes(Enc.DER)) == certs[:1]
+    assert _parse_certs(certs[0].public_bytes(Enc.PEM)) == certs[:1]
+    assert set(_parse_certs(pkcs7.serialize_certificates(certs, Enc.DER))) == set(certs)  # SET: sin orden
+    assert set(_parse_certs(pkcs7.serialize_certificates(certs, Enc.PEM))) == set(certs)  # SET: sin orden
+    with pytest.raises(ValueError):
+        _parse_certs(b"<html>404</html>")
+
+
+def test_issued_by_accepts_sha1():
+    """cryptography no verifica SHA-1, pero PKIs reales lo siguen usando: la AC Raíz
+    de Argentina firma con SHA-1 a la CA de la ONTI (emisora de los certs de CiDi)."""
+    root = x509.load_der_x509_certificate((DATA / "ac-raiz-argentina.der").read_bytes())
+    onti = x509.load_der_x509_certificate((DATA / "ac-onti-firma-digital.der").read_bytes())
+    assert onti.signature_hash_algorithm.name == "sha1"
+
+    assert _issued_by(root, root)
+    assert _issued_by(onti, root)
+    assert not _issued_by(root, onti)
+    assert not _issued_by(onti, onti)
 
 
 # --------------------------------------------------------------------------- casos inválidos

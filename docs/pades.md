@@ -464,14 +464,17 @@ Devuelve, por cada firma y cada `/DocTimeStamp`, la cadena de certificados **tal
 
 1. **Chequeo criptográfico** (`intact` y `valid`, ver tabla de arriba). En un `/Sig`, el `message-digest` tiene que coincidir con el hash del ByteRange. En un `/DocTimeStamp`, los atributos firmados cubren el TSTInfo, y el `messageImprint` del TSTInfo tiene que coincidir con el hash del ByteRange. Si falla, la firma se informa con `crypto_valid: false`, un `error` y `certificates: null`.
 2. **Armado de la cadena**: parte del certificado firmante y busca al emisor de cada eslabón entre los certificados del CMS y del DSS. Un candidato es el emisor sólo si su sujeto coincide con el emisor del eslabón **y** su clave pública verifica la firma de ese certificado (no alcanza con que coincida el nombre). Se detiene en un certificado autofirmado. `chain_complete` indica si se llegó a uno.
+   - **Completar por AIA**: muchos firmadores (por ejemplo Ciudadano Digital de Córdoba) embeben **sólo** el certificado del firmante, sin intermedia, raíz ni DSS. Si falta un emisor y `fetch_missing` es `true` (el valor por defecto), se descarga desde la URL **AIA caIssuers** del eslabón (`http://…/ca.crt`, en DER, PEM o PKCS#7) y se repite con el certificado descargado hasta llegar a la raíz. Las descargas tienen timeout y caché por request. Si alguna falla, el detalle queda en `aia_errors` y la cadena se corta ahí.
+   - **SHA-1**: `cryptography` se niega a verificar firmas SHA-1, pero PKIs reales las siguen usando (la AC Raíz de Argentina firma con SHA-1 a la CA de la ONTI). Como acá sólo se arma la cadena y no se evalúa política, en ese caso la firma RSA/ECDSA se verifica a mano.
 3. **Clasificación** de cada certificado:
    - `end_entity`: el que firmó (posición 0).
    - `root`: autofirmado, es decir emisor = sujeto y firmado con su propia clave.
    - `intermediate`: cualquier otro eslabón.
    - `self_signed` se informa aparte, para cubrir el caso de un firmante con certificado autofirmado (`end_entity` y `self_signed: true`).
-4. **`der_b64`**: el certificado en DER codificado en base64 (sólo la parte pública). Decodificado se guarda como `.crt`/`.cer`. Con encabezados `-----BEGIN CERTIFICATE-----` es un PEM.
+4. **`source`**: de dónde salió cada certificado: `cms` (embebido en la firma o en el token), `dss` o `aia` (descargado). Si un certificado está en varios lugares, gana el primero de esa lista.
+5. **`der_b64`**: el certificado en DER codificado en base64 (sólo la parte pública). Decodificado se guarda como `.crt`/`.cer`. Con encabezados `-----BEGIN CERTIFICATE-----` es un PEM.
 
-5. **Signature timestamp**: cada firma (`/Sig`) válida trae además `signature_timestamp`, con la hora certificada (`time`) y la cadena de la TSA que la selló. El token se chequea igual que un DocTimeStamp, con una diferencia: su `messageImprint` tiene que coincidir con el hash del **valor de la firma** (lo que sella la TSA en B-T), no con el ByteRange. Si no coincide, el error es `"el sello no corresponde a esta firma"`. La cadena se arma con los certificados del token, completados con los del CMS de la firma y los del DSS. Vale `null` si la firma no tiene sello (B-B) o si la firma misma no es válida.
+6. **Signature timestamp**: cada firma (`/Sig`) válida trae además `signature_timestamp`, con la hora certificada (`time`) y la cadena de la TSA que la selló. El token se chequea igual que un DocTimeStamp, con una diferencia: su `messageImprint` tiene que coincidir con el hash del **valor de la firma** (lo que sella la TSA en B-T), no con el ByteRange. Si no coincide, el error es `"el sello no corresponde a esta firma"`. La cadena se arma con los certificados del token, completados con los del CMS de la firma y los del DSS. Vale `null` si la firma no tiene sello (B-B) o si la firma misma no es válida.
 
 Forma de la respuesta:
 
@@ -481,7 +484,7 @@ Forma de la respuesta:
     {
       "field": "Firma1", "type": "Signature",
       "crypto_valid": true, "intact": true, "valid": true, "chain_complete": true,
-      "certificates": [ { "type": "end_entity", "self_signed": false, "der_b64": "MIIF…", "...": "..." }, "…" ],
+      "certificates": [ { "type": "end_entity", "source": "cms", "self_signed": false, "der_b64": "MIIF…", "...": "..." }, "…" ],
       "signature_timestamp": {
         "time": "2026-09-30T23:29:45+00:00",
         "crypto_valid": true, "intact": true, "valid": true, "chain_complete": true,

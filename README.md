@@ -68,7 +68,7 @@ La PKI, con sus claves, vive en el volumen `/data`. `PUBLIC_BASE_URL` queda **gr
 - `POST /tsa`: TSA RFC 3161 (`application/timestamp-query` → `application/timestamp-reply`).
 - `POST /sign`: recibe `pdf` (archivo), `reason`, `location` y `lta` (bool). Re-firmar un PDF ya firmado agrega `Firma2`, `Firma3`, etc.
 - `POST /verify`: valida **offline** (sin descargar nada y con revocación `hard-fail`) usando sólo lo que viene en el DSS. Que pase esta validación demuestra que la firma es LT.
-- `POST /certificates`: recibe `pdf` y, por cada firma (incluidos los DocTimeStamp) **criptográficamente válida**, devuelve la cadena hoja → raíz armada con los certificados del propio PDF (CMS + DSS). Cada certificado trae `type` (`end_entity`, `intermediate`, `root`), `self_signed` y `der_b64` (el `.crt` en DER, base64). Cada firma incluye también `signature_timestamp`, con la hora y la cadena de la TSA que la selló. No exige confianza: también extrae cadenas de PKIs ajenas.
+- `POST /certificates`: recibe `pdf` y, por cada firma (incluidos los DocTimeStamp) **criptográficamente válida**, devuelve la cadena hoja → raíz armada con los certificados del propio PDF (CMS + DSS). Si el PDF no trae algún emisor (es habitual que sólo embeba el del firmante), lo descarga de la URL **AIA caIssuers** del certificado; se desactiva con `fetch_missing=false`. Cada certificado trae `type` (`end_entity`, `intermediate`, `root`), `source` (`cms`, `dss` o `aia`), `self_signed` y `der_b64` (el `.crt` en DER, base64). Cada firma incluye también `signature_timestamp`, con la hora y la cadena de la TSA que la selló. No exige confianza: también extrae cadenas de PKIs ajenas.
 
 Para verificar el respondedor OCSP con una implementación independiente:
 
