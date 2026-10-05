@@ -55,7 +55,7 @@ Al firmar, la app **se consulta a sí misma** por HTTP como si la TSA, el OCSP y
 
 Función que convierte datos de cualquier tamaño en un valor de tamaño fijo (el *digest*). Es de un solo sentido y resistente a colisiones: cambiar un bit del documento cambia completamente el resumen. Se firma el hash, no el documento entero.
 
-> En el código: `md_algorithm="sha256"` en [app.py](../src/pades_lt_poc/app.py). Todos los certificados, CRLs y respuestas OCSP también se firman con SHA-256.
+> En el código: `md_algorithm="sha256"` en [services/signing.py](../src/pades_lt_poc/services/signing.py). Todos los certificados, CRLs y respuestas OCSP también se firman con SHA-256.
 
 ### Criptografía asimétrica
 
@@ -120,7 +120,7 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 **Validar un camino** (RFC 5280 §6) significa comprobar, para cada eslabón: la firma del emisor, las fechas de validez, las extensiones (que una CA sea realmente CA, que la clave tenga el uso correcto) y el estado de revocación.
 
-> En el código: `app.state.root` es el ancla de confianza al firmar. Al verificar (`app.state.verify_roots`) se suman las raíces de `src/pades_lt_poc/trust/`, hoy las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)). Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
+> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`SignatureVerifier.trust_roots`) se suman las raíces de `src/pades_lt_poc/trust/`, hoy las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)). Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
 ### Rotación de la raíz
 
@@ -274,7 +274,7 @@ Consultado el 30/09/2026 con un certificado de Ciudadano Digital (CiDi, Córdoba
 
 Los números confirman lo de la sección anterior: la raíz, *offline*, publica una CRL chica y de larga duración; la CA operativa publica una CRL enorme y diaria, y ofrece OCSP para no obligar a descargarla.
 
-> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). `/verify` relaja la política de algoritmos débiles de pyHanko sólo para la clave de la AC Raíz (`_LegacyRootsPolicy`): acepta SHA-1 en los certificados y CRLs que ella firma, y lo sigue rechazando en firmantes, TSAs y demás CAs. Un upgrade a LT de firmas de esta PKI necesitaría además incluir en el DSS el certificado del respondedor OCSP.
+> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). `/verify` relaja la política de algoritmos débiles de pyHanko sólo para la clave de la AC Raíz (`LegacyRootsPolicy`): acepta SHA-1 en los certificados y CRLs que ella firma, y lo sigue rechazando en firmantes, TSAs y demás CAs. Un upgrade a LT de firmas de esta PKI necesitaría además incluir en el DSS el certificado del respondedor OCSP.
 
 ### Hard-fail y soft-fail
 
@@ -312,7 +312,7 @@ Validar un sello implica validar la firma de la TSA y su cadena (incluida la rev
 | **Signature timestamp** | El valor de la firma del firmante | Atributo no firmado `signature-time-stamp-token` dentro del CMS | B-T |
 | **Document timestamp** | Todo el PDF (incluido el DSS) | Un campo de firma propio, de tipo `/DocTimeStamp` | B-LTA |
 
-> En el código: `POST /tsa` en [app.py](../src/pades_lt_poc/app.py) expone el `DummyTimeStamper` de pyHanko (toma la hora del servidor y usa un OID de política de ejemplo). La firma lo consume con `HTTPTimeStamper(f"{base}/tsa")` como si fuera una TSA externa. Los tokens incluyen la cadena `tsa → intermedia → raíz`.
+> En el código: `POST /tsa` ([routers/tsa.py](../src/pades_lt_poc/routers/tsa.py)) expone el `DummyTimeStamper` de pyHanko (toma la hora del servidor y usa un OID de política de ejemplo). La firma lo consume con `HTTPTimeStamper(tsa_url)` como si fuera una TSA externa. Los tokens incluyen la cadena `tsa → intermedia → raíz`.
 
 ---
 
@@ -502,10 +502,10 @@ Detalles:
 
 ```python
 ValidationContext(
-    trust_roots=[root, ac_raiz_2007, ac_raiz_2016],  # app.state.verify_roots
+    trust_roots=[root, ac_raiz_2007, ac_raiz_2016],  # SignatureVerifier.trust_roots
     allow_fetching=False,
     revocation_mode="hard-fail",
-    algorithm_usage_policy=_LegacyRootsPolicy([ac_raiz_2007]),  # SHA-1 sólo para la raíz de 2007
+    algorithm_usage_policy=LegacyRootsPolicy([ac_raiz_2007]),  # SHA-1 sólo para la raíz de 2007
     moment=...,  # ahora, o la hora declarada con validation_time=claimed_signing_time
 )
 ```

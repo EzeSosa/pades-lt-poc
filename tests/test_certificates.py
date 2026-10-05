@@ -26,9 +26,10 @@ from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.generic_cms import extract_tst_data_iter
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-from pades_lt_poc import app as app_module
 from pades_lt_poc import pki
-from pades_lt_poc.app import _extract_chain, _issued_by, _parse_certs
+from pades_lt_poc.services import certificates as certificates_service
+from pades_lt_poc.services.certificates import _extract_chain, _issued_by, _parse_certs
+from pades_lt_poc.services.verification import TRUST_DIR
 
 DATA = Path(__file__).parent / "data"
 
@@ -175,7 +176,7 @@ def aia_via_app(client, monkeypatch) -> Counter:
         r.raise_for_status()
         return r.content
 
-    monkeypatch.setattr(app_module, "_http_get", get)
+    monkeypatch.setattr(certificates_service, "_http_get", get)
     return calls
 
 
@@ -221,7 +222,7 @@ def test_parse_certs_accepts_der_pem_and_pkcs7(client):  # client: genera la PKI
 def test_issued_by_accepts_sha1():
     """cryptography no verifica SHA-1, pero PKIs reales lo siguen usando: la AC Raíz
     de Argentina firma con SHA-1 a la CA de la ONTI (emisora de los certs de CiDi)."""
-    root = x509.load_der_x509_certificate((app_module.TRUST_DIR / "ac-raiz-argentina-2007.der").read_bytes())
+    root = x509.load_der_x509_certificate((TRUST_DIR / "ac-raiz-argentina-2007.der").read_bytes())
     onti = x509.load_der_x509_certificate((DATA / "ac-onti-firma-digital.der").read_bytes())
     assert onti.signature_hash_algorithm.name == "sha1"
 

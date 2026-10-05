@@ -9,12 +9,16 @@ from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 from conftest import load_signer, sign
-from pades_lt_poc import app as app_module
-from pades_lt_poc.app import CLAIMED_TIME_WARNING, UNALLOCATED_FREES_NOTE, _LegacyRootsPolicy
+from pades_lt_poc.services.verification import (
+    CLAIMED_TIME_WARNING,
+    TRUST_DIR,
+    UNALLOCATED_FREES_NOTE,
+    LegacyRootsPolicy,
+)
 
 DATA = Path(__file__).parent / "data"
-AC_RAIZ_2007 = load_cert_from_pemder(str(app_module.TRUST_DIR / "ac-raiz-argentina-2007.der"))
-AC_RAIZ_2016 = load_cert_from_pemder(str(app_module.TRUST_DIR / "ac-raiz-argentina-2016.der"))
+AC_RAIZ_2007 = load_cert_from_pemder(str(TRUST_DIR / "ac-raiz-argentina-2007.der"))
+AC_RAIZ_2016 = load_cert_from_pemder(str(TRUST_DIR / "ac-raiz-argentina-2016.der"))
 ONTI = load_cert_from_pemder(str(DATA / "ac-onti-firma-digital.der"))
 
 
@@ -24,21 +28,21 @@ def verify(client, pdf: bytes, **data):
 
 # --------------------------------------------------------------------------- anclas
 def test_verify_trusts_poc_root_and_both_ac_raiz(client):
-    roots = [c.dump() for c in client.app.state.verify_roots]
-    assert roots[0] == client.app.state.root.dump()
+    roots = [c.dump() for c in client.app.state.verifier.trust_roots]
+    assert roots[0] == client.app.state.signer.trust_root.dump()
     assert AC_RAIZ_2007.dump() in roots
     assert AC_RAIZ_2016.dump() in roots
 
 
 def test_sha1_exemption_only_for_roots_born_with_sha1(client):
     """La de 2007 firma con SHA-1; la de 2016, con SHA-512, no necesita la excepción."""
-    legacy = client.app.state.verify_algorithm_policy._legacy_keys
+    legacy = client.app.state.verifier.algorithm_policy._legacy_keys
     assert legacy == {AC_RAIZ_2007.public_key.dump()}
 
 
 def test_sha1_allowed_only_for_legacy_root_key():
     """La AC Raíz firma con SHA-1 a la CA de la ONTI: se acepta para su clave y para ninguna otra."""
-    policy = _LegacyRootsPolicy([AC_RAIZ_2007])
+    policy = LegacyRootsPolicy([AC_RAIZ_2007])
     algo = ONTI["signature_algorithm"]
     assert algo.hash_algo == "sha1"
 

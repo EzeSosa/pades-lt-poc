@@ -59,6 +59,25 @@ docker compose down -v               # borra la PKI; se regenera al próximo arr
 
 La PKI, con sus claves, vive en el volumen `/data`. `PUBLIC_BASE_URL` queda **grabada en los certificados** (URLs de CRL, AIA y OCSP) al generarse la PKI, así que tiene que ser alcanzable desde el propio contenedor (la app se consulta a sí misma al firmar) y desde quien valide las firmas. Si la cambiás, regenerá la PKI con `down -v`.
 
+## Estructura
+
+```
+src/pades_lt_poc/
+├── app.py            crea la app: lifespan (PKI + servicios), routers y manejo de errores
+├── dependencies.py   inyecta en los endpoints los servicios creados en el lifespan
+├── pki.py            la mini PKI: certificados, CRLs, OCSP y revocación
+├── routers/          endpoints HTTP, uno por área: validan la entrada y delegan
+│   ├── pki.py  ocsp.py  tsa.py
+│   └── signing.py  verification.py  certificates.py
+└── services/         una clase por operación, sin nada de HTTP
+    ├── signing.py        PdfSigner            (/sign)
+    ├── verification.py   SignatureVerifier    (/verify) + políticas de algoritmos y de modificaciones
+    ├── certificates.py   CertificateExtractor (/certificates) + armado de cadenas y descarga AIA
+    └── timestamping.py   motor de la TSA      (/tsa)
+```
+
+Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar, y la app lo devuelve como `422`.
+
 ## Endpoints
 
 - `GET  /pki/{root|intermediate}.crt`: certificados de las CAs en PEM. Importá `root.crt` como confiable en Adobe Reader para ver la firma en verde.
