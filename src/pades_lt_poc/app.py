@@ -19,7 +19,10 @@ import base64
 import hashlib
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from io import BytesIO
+from pathlib import Path
+from typing import Literal
 
 import requests
 from asn1crypto import cms, tsp
@@ -36,6 +39,7 @@ from pyhanko.keys import load_cert_from_pemder, load_private_key_from_pemder
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import fields, signers
+from pyhanko.sign.diff_analysis import DEFAULT_DIFF_POLICY, StandardDiffPolicy, SuspiciousModification
 from pyhanko.sign.timestamps import DummyTimeStamper, HTTPTimeStamper
 from pyhanko.sign.validation import DocumentSecurityStore, async_validate_pdf_signature
 from pyhanko.sign.validation.errors import SignatureValidationError
@@ -47,6 +51,7 @@ from pyhanko.sign.validation.generic_cms import (
 )
 from pyhanko.sign.validation.pdf_embedded import EmbeddedPdfSignature
 from pyhanko_certvalidator import ValidationContext
+from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowWeakAlgorithmsPolicy
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
 from . import pki
@@ -75,8 +80,40 @@ async def lifespan(app: FastAPI):
             str(pki.entity(pki.ROOT).cert_path),
         ),
     )
-    app.state.root = root  # único ancla de confianza
+    app.state.root = root  # ancla de confianza para firmar
+    # Al verificar se confía además en las raíces de PKIs reales incluidas en el paquete.
+    app.state.verify_roots = [root, *_bundled_roots()]
+    app.state.verify_algorithm_policy = _LegacyRootsPolicy(
+        [r for r in app.state.verify_roots if r["signature_algorithm"].hash_algo == "sha1"]
+    )
     yield
+
+
+TRUST_DIR = Path(__file__).parent / "trust"
+
+
+def _bundled_roots() -> list[asn1_x509.Certificate]:
+    """Raíces de `trust/` (las AC Raíz de Argentina de 2007 y 2016), en DER."""
+    return [load_cert_from_pemder(str(p)) for p in sorted(TRUST_DIR.glob("*.der"))]
+
+
+class _LegacyRootsPolicy(DisallowWeakAlgorithmsPolicy):
+    """Rechaza SHA-1 como pyHanko, salvo en lo que firman las claves de `roots`.
+
+    La AC Raíz de Argentina de 2007 firma con SHA-1 a sus CAs y a su CRL. Se lo
+    acepta sólo para la clave de las raíces que nacieron con SHA-1: los firmantes,
+    las TSAs y las demás CAs siguen sin poder usarlo.
+    """
+
+    def __init__(self, roots: list[asn1_x509.Certificate]) -> None:
+        super().__init__()
+        self._legacy_keys = {r.public_key.dump() for r in roots}
+        self._legacy = DisallowWeakAlgorithmsPolicy(weak_hash_algos=DEFAULT_WEAK_HASH_ALGOS - {"sha1"})
+
+    def signature_algorithm_allowed(self, algo, moment, public_key):
+        if public_key is not None and public_key.dump() in self._legacy_keys:
+            return self._legacy.signature_algorithm_allowed(algo, moment, public_key)
+        return super().signature_algorithm_allowed(algo, moment, public_key)
 
 
 app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
@@ -187,28 +224,101 @@ async def sign(
 
 
 # --------------------------------------------------------------------------- Verificación
+class _UnallocatedFreesPolicy(StandardDiffPolicy):
+    """La política por defecto de pyHanko, salvo que acepta entradas libres de objetos que nunca existieron.
+
+    iText marca a veces un número de objeto reservado y nunca escrito como `65535 f`
+    (muerto para siempre). pyHanko lo trata como si se borrara un objeto, pero un
+    número >= al /Size de la revisión anterior no pudo haber existido: no se borra nada.
+    Liberar un objeto que sí existía sigue siendo sospechoso.
+    """
+
+    def __init__(self) -> None:
+        d = DEFAULT_DIFF_POLICY
+        super().__init__(d.global_rules, d.form_rule, reject_object_freeing=False)
+
+    def apply(self, old, new, field_mdp_spec=None, doc_mdp=None):
+        prev_size = new.reader.trailer.flatten(new.revision - 1)["/Size"]
+        freed = {ref for ref in new.refs_freed_in_revision() if ref.idnum < prev_size}
+        if freed:
+            raise SuspiciousModification(
+                f"The refs {freed} were freed in the revision provided. "
+                "The configured difference analysis policy does not allow object freeing."
+            )
+        return super().apply(old, new, field_mdp_spec, doc_mdp)
+
+
+DIFF_POLICIES = {"default": DEFAULT_DIFF_POLICY, "allow_unallocated_free_entries": _UnallocatedFreesPolicy()}
+UNALLOCATED_FREES_NOTE = (
+    "Se aceptaron entradas libres de la xref para números de objeto que no existían en la "
+    "revisión anterior (p. ej. `178 65535 f` de iText): no borran nada. El resto del análisis "
+    "de modificaciones es el de pyHanko por defecto."
+)
+
+CLAIMED_TIME_WARNING = (
+    "Validado a la hora de firma que declara el propio firmante, no a una hora probada por "
+    "un sello de tiempo: el firmante pudo haberla elegido. Además se acepta revocación emitida "
+    "después de esa hora, lo que no detecta suspensiones levantadas. No prueba que la firma sea LT."
+)
+
+
 @app.post("/verify")
-async def verify(pdf: UploadFile = File(...)) -> dict:
-    reader = PdfFileReader(BytesIO(await pdf.read()))
+async def verify(
+    pdf: UploadFile = File(...),
+    validation_time: Literal["now", "claimed_signing_time"] = Form(
+        "now",
+        description=(
+            "now: valida a la hora actual (por defecto). claimed_signing_time: valida cada firma "
+            "a la hora que ella misma declara; sirve para firmas sin sello de tiempo cuya "
+            "revocación embebida ya venció, pero esa hora no está probada."
+        ),
+    ),
+    diff_policy: Literal["default", "allow_unallocated_free_entries"] = Form(
+        "default",
+        description=(
+            "Análisis de las modificaciones posteriores a cada firma. default: el de pyHanko. "
+            "allow_unallocated_free_entries: además acepta entradas libres de objetos que nunca existieron."
+        ),
+    ),
+) -> dict:
+    reader = PdfFileReader(BytesIO(await pdf.read()), strict=False)
     if not reader.embedded_signatures:
         raise HTTPException(422, "El PDF no tiene firmas")
 
     has_dss = "/DSS" in reader.root
     # Validación OFFLINE: sin fetching, con revocación obligatoria. Sólo pasa si
     # todo lo necesario (certs + CRLs) está dentro del PDF -> prueba de B-LT.
-    vc_kwargs = dict(trust_roots=[app.state.root], allow_fetching=False, revocation_mode="hard-fail")
-    vc = (
-        DocumentSecurityStore.read_dss(reader).as_validation_context(vc_kwargs)
-        if has_dss
-        else ValidationContext(**vc_kwargs)
+    vc_kwargs = dict(
+        trust_roots=app.state.verify_roots,
+        allow_fetching=False,
+        revocation_mode="hard-fail",
+        algorithm_usage_policy=app.state.verify_algorithm_policy,
     )
+    dss_store = DocumentSecurityStore.read_dss(reader) if has_dss else None
+    now = datetime.now(UTC)
+
+    def context_at(moment: datetime, in_the_past: bool) -> ValidationContext:
+        # Validando en el pasado, la revocación embebida es posterior a `moment` (se obtuvo
+        # después de firmar) y pyHanko la descarta salvo con `retroactive_revinfo`.
+        kwargs = {**vc_kwargs, "moment": moment, "retroactive_revinfo": in_the_past}
+        if dss_store:
+            return dss_store.as_validation_context(kwargs)
+        # Sin DSS no hay revocación: listas vacías para que la firma resulte no confiable
+        # (pyHanko lanza ValueError si en hard-fail sin fetching no recibe ninguna).
+        return ValidationContext(**kwargs, crls=[], ocsps=[])
 
     results = []
     for sig in reader.embedded_signatures:
         if sig.sig_object.get("/Type") == "/DocTimeStamp":
             results.append({"field": sig.field_name, "type": "DocTimeStamp"})
             continue
-        status = await async_validate_pdf_signature(sig, signer_validation_context=vc, ts_validation_context=vc)
+        # La hora declarada sale del atributo signingTime del CMS o, si no está, de /M.
+        claimed = sig.self_reported_timestamp if validation_time == "claimed_signing_time" else None
+        moment, source = (claimed, "claimed_signing_time") if claimed else (now, "now")
+        vc = context_at(moment, in_the_past=claimed is not None)
+        status = await async_validate_pdf_signature(
+            sig, signer_validation_context=vc, ts_validation_context=vc, diff_policy=DIFF_POLICIES[diff_policy]
+        )
         results.append(
             {
                 "field": sig.field_name,
@@ -220,6 +330,15 @@ async def verify(pdf: UploadFile = File(...)) -> dict:
                 "valid": status.valid,
                 "trusted": status.trusted,
                 "coverage": status.coverage.name,
+                # Qué cambió después de la firma: si es sospechoso, `bottom_line` da false.
+                "modifications": {
+                    "level": status.modification_level.name if status.modification_level else None,
+                    "docmdp_ok": status.docmdp_ok,
+                    "suspicious": (
+                        str(status.diff_result) if isinstance(status.diff_result, SuspiciousModification) else None
+                    ),
+                },
+                "validated_at": {"time": moment.isoformat(), "source": source},
                 "signature_timestamp": (
                     {
                         "time": status.timestamp_validity.timestamp.isoformat(),
@@ -241,12 +360,26 @@ async def verify(pdf: UploadFile = File(...)) -> dict:
         level = "PAdES B-T"
         if has_dss and all(r["bottom_line"] for r in sig_ok):
             level = "PAdES B-LTA" if has_doc_ts else "PAdES B-LT"
+    # Los arrays del DSS pueden ser referencias indirectas: `[]` las resuelve, `.get` no.
+    dss_dict = reader.root["/DSS"] if has_dss else None
     dss = (
-        {k: len(reader.root["/DSS"].get(f"/{k}", [])) for k in ("Certs", "OCSPs", "CRLs")}
+        {k: len(dss_dict[f"/{k}"]) if f"/{k}" in dss_dict else 0 for k in ("Certs", "OCSPs", "CRLs")}
         if has_dss
         else None
     )
-    return {"pades_level": level, "dss": dss, "signatures": results}
+    return {
+        "validation_time": {
+            "mode": validation_time,
+            "warning": CLAIMED_TIME_WARNING if validation_time == "claimed_signing_time" else None,
+        },
+        "diff_policy": {
+            "mode": diff_policy,
+            "note": UNALLOCATED_FREES_NOTE if diff_policy == "allow_unallocated_free_entries" else None,
+        },
+        "pades_level": level,
+        "dss": dss,
+        "signatures": results,
+    }
 
 
 # --------------------------------------------------------------------------- Certificados
@@ -464,7 +597,7 @@ def _signature_timestamp(
 
 
 def _extract_all(data: bytes, fetch_missing: bool) -> dict:
-    reader = PdfFileReader(BytesIO(data))
+    reader = PdfFileReader(BytesIO(data), strict=False)
     if not reader.embedded_signatures:
         raise HTTPException(422, "El PDF no tiene firmas")
 

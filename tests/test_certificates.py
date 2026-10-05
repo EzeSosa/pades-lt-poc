@@ -221,7 +221,7 @@ def test_parse_certs_accepts_der_pem_and_pkcs7(client):  # client: genera la PKI
 def test_issued_by_accepts_sha1():
     """cryptography no verifica SHA-1, pero PKIs reales lo siguen usando: la AC Raíz
     de Argentina firma con SHA-1 a la CA de la ONTI (emisora de los certs de CiDi)."""
-    root = x509.load_der_x509_certificate((DATA / "ac-raiz-argentina.der").read_bytes())
+    root = x509.load_der_x509_certificate((app_module.TRUST_DIR / "ac-raiz-argentina-2007.der").read_bytes())
     onti = x509.load_der_x509_certificate((DATA / "ac-onti-firma-digital.der").read_bytes())
     assert onti.signature_hash_algorithm.name == "sha1"
 

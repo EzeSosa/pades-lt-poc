@@ -120,7 +120,7 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 **Validar un camino** (RFC 5280 §6) significa comprobar, para cada eslabón: la firma del emisor, las fechas de validez, las extensiones (que una CA sea realmente CA, que la clave tenga el uso correcto) y el estado de revocación.
 
-> En el código: `app.state.root` es el **único** ancla de confianza, tanto al firmar como al verificar. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
+> En el código: `app.state.root` es el ancla de confianza al firmar. Al verificar (`app.state.verify_roots`) se suman las raíces de `src/pades_lt_poc/trust/`, hoy las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)). Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
 ### Rotación de la raíz
 
@@ -144,6 +144,19 @@ Que la raíz sea el ancla de confianza no la hace eterna. Su confianza no se der
 - **Se puede probar que se firmó cuando todo era válido.** Eso lo dan el sello de tiempo (B-T) y su renovación (B-LTA). Sin sello, el validador evalúa la firma a la fecha actual, con la cadena ya vencida.
 
 Es una razón más por la que una firma B-B, sin sello ni DSS, es frágil a largo plazo: cuando venza la raíz sólo se podrá validar si el validador acepta evaluarla en una fecha pasada que nadie certificó.
+
+**El caso argentino**: hoy conviven dos raíces, y `/verify` confía en ambas (`src/pades_lt_poc/trust/`):
+
+| | *AC Raíz* (2007) | *AC Raíz de la República Argentina* (2016) |
+|---|---|---|
+| Vigencia | 22/11/2007 al 17/11/2027 | 30/06/2016 al 30/06/2036 |
+| Firma | RSA 4096 con **SHA-1** | RSA 4096 con **SHA-512** |
+| Clave | Distinta | Distinta (no hay certificación cruzada entre ellas) |
+| CRL | `acraiz.cdp1.gov.ar/ca.crl` | `acraiz.cdp1.gov.ar/acraizra.crl` |
+| Emite a | La CA de la ONTI (de ahí cuelgan CiDi y los tokens de la AC ONTI) | Certificadores licenciados como AC2-LAKAUT (firmantes de empresas y la TSA) |
+| SHA-256 | `CC85ED49…5B3BD463` | `975C6635…1E9F8BA4` |
+
+Ambas se descargaron de los enlaces de la [página oficial de la AC Raíz](https://www.argentina.gob.ar/jefatura/innovacion-ciencia-y-tecnologia/innovacion/firma-digital/ac-raiz) (`https://acraiz.gov.ar/ca.crt` y `.../acraizra.crt`). Un ancla de confianza nunca se toma del PDF que se está validando.
 
 ### Extensiones usadas en la PoC
 
@@ -261,7 +274,7 @@ Consultado el 30/09/2026 con un certificado de Ciudadano Digital (CiDi, Córdoba
 
 Los números confirman lo de la sección anterior: la raíz, *offline*, publica una CRL chica y de larga duración; la CA operativa publica una CRL enorme y diaria, y ofrece OCSP para no obligar a descargarla.
 
-> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). Un upgrade a LT de firmas de esta PKI necesitaría además relajar la política de algoritmos débiles del validador de pyHanko, e incluir en el DSS el certificado del respondedor OCSP.
+> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). `/verify` relaja la política de algoritmos débiles de pyHanko sólo para la clave de la AC Raíz (`_LegacyRootsPolicy`): acepta SHA-1 en los certificados y CRLs que ella firma, y lo sigue rechazando en firmantes, TSAs y demás CAs. Un upgrade a LT de firmas de esta PKI necesitaría además incluir en el DSS el certificado del respondedor OCSP.
 
 ### Hard-fail y soft-fail
 
@@ -488,15 +501,42 @@ Detalles:
 `POST /verify` recibe un `pdf` y valida **offline**:
 
 ```python
-ValidationContext(trust_roots=[root], allow_fetching=False, revocation_mode="hard-fail")
+ValidationContext(
+    trust_roots=[root, ac_raiz_2007, ac_raiz_2016],  # app.state.verify_roots
+    allow_fetching=False,
+    revocation_mode="hard-fail",
+    algorithm_usage_policy=_LegacyRootsPolicy([ac_raiz_2007]),  # SHA-1 sólo para la raíz de 2007
+    moment=...,  # ahora, o la hora declarada con validation_time=claimed_signing_time
+)
 ```
 
 cargado con el contenido del DSS del PDF. Sin descargas y con revocación obligatoria, **sólo pasa si toda la evidencia está dentro del PDF**. Esa es la prueba práctica de que la firma es LT.
+
+### Hora de validación (`validation_time`)
+
+- **`now`** (por defecto): valida a la hora actual. Es lo correcto, pero una firma **sin sello de tiempo** deja de validar cuando vencen las CRLs que embebió, porque no hay una hora probada en la que esa revocación estuviera vigente.
+- **`claimed_signing_time`** (explícito): valida cada firma a la hora que **ella misma declara** (atributo `signingTime` del CMS o `/M`), y acepta revocación emitida después de esa hora (`retroactive_revinfo`), porque el firmante la junta justamente después de firmar. Esa hora no está probada: el firmante pudo haberla elegido, y la revocación retroactiva no detecta una suspensión que se haya levantado después. Por eso la respuesta lo declara en `validation_time.warning`, y cada firma informa en `validated_at` qué hora se usó.
+
+### Análisis de modificaciones (`diff_policy`)
+
+Una firma cubre su revisión; lo que se agregó después (otras firmas, DSS, sellos) lo revisa la *diff policy* de pyHanko, que sólo acepta cambios de una lista blanca. Si encuentra algo fuera de ella, `bottom_line` da `false` aunque la firma esté intacta y sea confiable. El motivo sale en `modifications.suspicious`.
+
+Con PDFs reales firmados con iText aparecen tres casos:
+
+| Mensaje de pyHanko | Qué pasó | ¿Real? |
+|---|---|---|
+| `The refs {178 65534} were freed` | La revisión sube `/Size` y marca el número nuevo como `65535 f` (muerto) sin escribirlo nunca. | **No**: no existía, no se borra nada. Se tolera con `diff_policy=allow_unallocated_free_entries`. |
+| `VRI key … was modified or deleted` | Al agregar LTV para otra firma, iText reescribe las entradas VRI existentes en objetos nuevos, con el mismo contenido. pyHanko compara la referencia, no el contenido. | **No**, pero no se tolera: habría que reimplementar `DSSCompareRule`. |
+| `Dict keys differ: {…'/OutputIntents'} vs. {…}` | Una firma posterior agrega al catálogo un OutputIntent PDF/A (sRGB). Las claves se listan como (nueva, vieja). | **Sí**: cambio de bajo riesgo, pero afecta la interpretación del color. |
+
+`allow_unallocated_free_entries` sólo acepta entradas libres con número de objeto `>=` al `/Size` de la revisión anterior. Liberar un objeto que existía sigue siendo sospechoso, y el resto del análisis es el de pyHanko por defecto. La respuesta lo declara en `diff_policy.note`.
 
 ### Respuesta
 
 ```json
 {
+  "validation_time": { "mode": "now", "warning": null },
+  "diff_policy": { "mode": "default", "note": null },
   "pades_level": "PAdES B-LTA",
   "dss": { "Certs": 5, "OCSPs": 2, "CRLs": 1 },
   "signatures": [
@@ -510,6 +550,8 @@ cargado con el contenido del DSS del PDF. Sin descargas y con revocación obliga
       "valid": true,
       "trusted": true,
       "coverage": "ENTIRE_REVISION",
+      "modifications": { "level": "LTA_UPDATES", "docmdp_ok": true, "suspicious": null },
+      "validated_at": { "time": "...", "source": "now" },
       "signature_timestamp": { "time": "...", "tsa": "...", "valid": true, "trusted": true },
       "details": "..."
     },
@@ -525,6 +567,8 @@ cargado con el contenido del DSS del PDF. Sin descargas y con revocación obliga
 | `trusted` | Se pudo construir y validar la cadena hasta la raíz confiable, **incluida la revocación** con la evidencia del DSS. |
 | `bottom_line` | Veredicto global de pyHanko: la firma es aceptable. |
 | `coverage` | Ver [Cobertura](#cobertura-coverage). |
+| `modifications` | Análisis de lo agregado después de la firma: nivel (`LTA_UPDATES`, `FORM_FILLING`, … u `OTHER` si es sospechoso), si respeta el DocMDP, y el motivo si es sospechoso. |
+| `validated_at` | Hora a la que se validó la firma y de dónde sale: `now` o `claimed_signing_time` (si la firma no declara hora, cae en `now`). |
 | `signature_timestamp` | Hora certificada por la TSA, quién la emitió y si ese sello es válido y confiable. |
 | `details` | Informe completo en texto de pyHanko. |
 
