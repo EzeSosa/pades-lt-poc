@@ -35,7 +35,7 @@ Un PDF B-LT típico queda con el siguiente DSS: 5 certificados, 2 respuestas OCS
 
 ```powershell
 uv sync
-uv run pades-lt-poc                  # http://127.0.0.1:8000  (Swagger en /docs)
+uv run pades-lt-poc                  # http://127.0.0.1:8000  (redirige al Swagger en /docs)
 uv run python scripts/demo.py        # firma out/documento.pdf y lo verifica
 uv run python scripts/demo.py --lta  # idem, en B-LTA
 ```

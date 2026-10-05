@@ -35,6 +35,7 @@ from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import AuthorityInformationAccessOID
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 from pyhanko.keys import load_cert_from_pemder, load_private_key_from_pemder
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
@@ -117,6 +118,11 @@ class _LegacyRootsPolicy(DisallowWeakAlgorithmsPolicy):
 
 
 app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse("/docs")
 
 
 # --------------------------------------------------------------------------- PKI
