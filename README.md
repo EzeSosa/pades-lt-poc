@@ -1,6 +1,6 @@
 # PoC PAdES B-LT con FastAPI + pyHanko
 
-Firma PDFs en **PAdES B-LT** (opcionalmente **B-LTA**) usando una mini PKI de dos niveles, un respondedor OCSP y una TSA RFC 3161, todo servido por la misma app.
+Firma PDFs en **PAdES B-LT** (opcionalmente **B-LTA**) usando una mini PKI de dos niveles, un respondedor OCSP y una TSA RFC 3161, todo servido por la misma app. Trae además una UI web para inspeccionar PDFs firmados: extraer la cadena de certificados de cada firma y ver un reporte de validación.
 
 Para entender los conceptos (PKI, CRL, OCSP, TSA, CMS, DSS, niveles PAdES) y cómo se aplican en el código, ver [docs/pades.md](docs/pades.md).
 
@@ -35,10 +35,23 @@ Un PDF B-LT típico queda con el siguiente DSS: 5 certificados, 2 respuestas OCS
 
 ```powershell
 uv sync
-uv run pades-lt-poc                  # http://127.0.0.1:8000  (redirige al Swagger en /docs)
+uv run pades-lt-poc                  # http://127.0.0.1:8000  (redirige a la UI; el Swagger está en /docs)
 uv run python scripts/demo.py        # firma out/documento.pdf y lo verifica
 uv run python scripts/demo.py --lta  # idem, en B-LTA
 ```
+
+## UI
+
+Abrir <http://127.0.0.1:8000> lleva a la UI. Son dos páginas que llaman a la API desde el navegador:
+
+| Página | Endpoint | Qué muestra |
+|--------|----------|-------------|
+| `/ui/certificates` | `POST /certificates` | Una card por firma (incluidos los DocTimeStamp) con su cadena hoja → raíz y, aparte, la de la TSA que la selló. Cada certificado tiene un botón para **descargar el `.crt`** (DER) y otro para **copiar su base64** al portapapeles. |
+| `/ui/verify` | `POST /verify` | Un reporte: nivel PAdES alcanzado, contenido del DSS y modo de validación, y una card por firma con integridad, confianza, cobertura, modificaciones, sello de tiempo y el detalle de pyHanko. Se puede **imprimir o guardar como PDF**. |
+
+Los formularios exponen las mismas opciones que la API (`fetch_missing`, `validation_time`, `diff_policy`). El link **API** abre el Swagger (`/docs`) en otra pestaña.
+
+Son HTML estáticos, sin build ni dependencias: viven en `src/pades_lt_poc/static/` junto con el CSS que comparten. Para copiar al portapapeles el navegador exige un contexto seguro (HTTPS o `localhost`). Si la app se sirve por IP sin HTTPS, la página usa un método alternativo que puede no estar disponible en todos los navegadores.
 
 ## Tests
 
@@ -57,6 +70,8 @@ docker compose down                  # conserva la PKI (volumen pki-data)
 docker compose down -v               # borra la PKI; se regenera al próximo arranque
 ```
 
+La imagen copia el código al construirse: después de cambiar algo, `docker compose up -d --build` reconstruye y recrea el contenedor (no hace falta bajarlo antes, y la PKI se conserva).
+
 La PKI, con sus claves, vive en el volumen `/data`. `PUBLIC_BASE_URL` queda **grabada en los certificados** (URLs de CRL, AIA y OCSP) al generarse la PKI, así que tiene que ser alcanzable desde el propio contenedor (la app se consulta a sí misma al firmar) y desde quien valide las firmas. Si la cambiás, regenerá la PKI con `down -v`.
 
 ## Estructura
@@ -68,12 +83,14 @@ src/pades_lt_poc/
 ├── pki.py            la mini PKI: certificados, CRLs, OCSP y revocación
 ├── routers/          endpoints HTTP, uno por área: validan la entrada y delegan
 │   ├── pki.py  ocsp.py  tsa.py
-│   └── signing.py  verification.py  certificates.py
-└── services/         una clase por operación, sin nada de HTTP
-    ├── signing.py        PdfSigner            (/sign)
-    ├── verification.py   SignatureVerifier    (/verify) + políticas de algoritmos y de modificaciones
-    ├── certificates.py   CertificateExtractor (/certificates) + armado de cadenas y descarga AIA
-    └── timestamping.py   motor de la TSA      (/tsa)
+│   ├── signing.py  verification.py  certificates.py
+│   └── ui.py             sirve las páginas de /ui
+├── services/         una clase por operación, sin nada de HTTP
+│   ├── signing.py        PdfSigner            (/sign)
+│   ├── verification.py   SignatureVerifier    (/verify) + políticas de algoritmos y de modificaciones
+│   ├── certificates.py   CertificateExtractor (/certificates) + armado de cadenas y descarga AIA
+│   └── timestamping.py   motor de la TSA      (/tsa)
+└── static/           la UI: certificates.html, verify.html y ui.css (servido en /ui/static)
 ```
 
 Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar, y la app lo devuelve como `422`.
@@ -88,6 +105,7 @@ Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar, y la
 - `POST /sign`: recibe `pdf` (archivo), `reason`, `location` y `lta` (bool). Re-firmar un PDF ya firmado agrega `Firma2`, `Firma3`, etc.
 - `POST /verify`: valida **offline** (sin descargar nada y con revocación `hard-fail`) usando sólo lo que viene en el DSS. Que pase esta validación demuestra que la firma es LT. Confía en la raíz de la PoC y en las de `src/pades_lt_poc/trust/` (las AC Raíz de Argentina de 2007 y 2016), aceptando SHA-1 sólo en lo que firma la raíz de 2007. Valida a la hora actual; con `validation_time=claimed_signing_time` valida cada firma a la hora que ella misma declara (no probada), y la respuesta lo indica en `validation_time` y en el `validated_at` de cada firma. Cada firma trae en `modifications` el análisis de los cambios posteriores (si es sospechoso, `bottom_line` da `false`); con `diff_policy=allow_unallocated_free_entries` se toleran las entradas libres de objetos que nunca existieron, que iText genera a veces.
 - `POST /certificates`: recibe `pdf` y, por cada firma (incluidos los DocTimeStamp) **criptográficamente válida**, devuelve la cadena hoja → raíz armada con los certificados del propio PDF (CMS + DSS). Si el PDF no trae algún emisor (es habitual que sólo embeba el del firmante), lo descarga de la URL **AIA caIssuers** del certificado; se desactiva con `fetch_missing=false`. Cada certificado trae `type` (`end_entity`, `intermediate`, `root`), `source` (`cms`, `dss` o `aia`), `self_signed` y `der_b64` (el `.crt` en DER, base64). Cada firma incluye también `signature_timestamp`, con la hora y la cadena de la TSA que la selló. No exige confianza: también extrae cadenas de PKIs ajenas.
+- `GET /`: redirige a `/ui/certificates`. `GET /ui/certificates` y `GET /ui/verify` son las páginas de la [UI](#ui), y `GET /docs` es el Swagger.
 
 Para verificar el respondedor OCSP con una implementación independiente:
 

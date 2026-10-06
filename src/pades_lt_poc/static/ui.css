@@ -1,0 +1,67 @@
+/* Estilos compartidos por las páginas de /ui. */
+:root {
+  --bg: #F4F5F7; --surface: #FFFFFF; --surface-2: #F8F9FB; --ink: #16181D; --muted: #4A505B;
+  --line: #DDE0E5; --line-soft: #ECEEF1; --accent: #1F5FBF;
+  --ok-bg: #E6F4EC; --ok-fg: #17633A; --warn-bg: #FFF4E0; --warn-fg: #8A4B00; --bad-bg: #FDECEA; --bad-fg: #A01F14;
+  --chip: #EEF1F6;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 'IBM Plex Sans', system-ui, sans-serif; }
+main { max-width: 1160px; margin: 0 auto; padding: 32px 16px 80px; display: flex; flex-direction: column; gap: 32px; }
+
+nav { display: flex; gap: 4px; flex-wrap: wrap; font-size: 14px; }
+nav a { color: var(--muted); text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; display: inline-flex; align-items: center; }
+nav a:hover { background: var(--line-soft); color: var(--ink); }
+nav a[aria-current="page"] { color: var(--ink); font-weight: 600; background: var(--surface); border: 1px solid var(--line); }
+
+h1 { margin: 0; font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+.eyebrow { font: 13px var(--mono); color: var(--muted); }
+.lead { margin: 6px 0 0; color: var(--muted); max-width: 680px; }
+
+form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.field.grow { flex: 1 1 320px; }
+.field input[type=file] { font: inherit; padding: 8px 0; max-width: 100%; }
+.field select { font: inherit; min-height: 44px; padding: 0 10px; border: 1px solid #C9CED6; border-radius: 8px; background: var(--surface); color: var(--ink); }
+.check { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+button { font: inherit; font-weight: 500; min-height: 44px; border-radius: 8px; cursor: pointer; }
+.primary { font-weight: 600; padding: 0 22px; border: 0; background: var(--accent); color: #fff; }
+.primary:disabled { opacity: .6; cursor: progress; }
+.secondary { font-size: 14px; padding: 0 14px; border: 1px solid #C9CED6; background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.secondary:hover { background: var(--surface-2); }
+
+.summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.summary h2 { margin: 0; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.status { font-size: 13px; color: var(--muted); }
+.error-box { background: var(--bad-bg); color: var(--bad-fg); border-radius: 10px; padding: 14px 18px; }
+
+.cards { display: flex; flex-direction: column; gap: 20px; }
+article { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--line-soft); }
+.card-head h3 { margin: 0; font: 600 20px var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.spacer { flex: 1 1 auto; }
+.chip { font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px; background: var(--chip); color: #3A4150; }
+.badge { font-size: 13px; font-weight: 500; padding: 4px 10px; border-radius: 6px; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.mono { font-family: var(--mono); overflow-wrap: anywhere; }
+.note { margin: 0; padding: 12px 22px; font-size: 13px; color: var(--warn-fg); background: var(--warn-bg); }
+
+details { background: var(--surface-2); border-top: 1px solid var(--line-soft); }
+summary { padding: 14px 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 14px; cursor: pointer; min-height: 44px; }
+summary .mono { color: var(--muted); }
+summary .toggle { color: var(--accent); font-weight: 500; margin-left: auto; }
+details[open] summary .toggle::after { content: " ▴"; }
+details:not([open]) summary .toggle::after { content: " ▾"; }
+
+@media print {
+  body { background: #fff; }
+  nav, form, .no-print { display: none !important; }
+  main { padding: 0; }
+  article { break-inside: avoid; }
+}

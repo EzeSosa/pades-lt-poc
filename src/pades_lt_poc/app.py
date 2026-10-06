@@ -11,10 +11,13 @@ Endpoints:
   POST /sign                          sube un PDF, devuelve el PDF firmado PAdES B-LT
   POST /verify                        valida offline usando sólo el DSS embebido
   POST /certificates                  extrae la cadena de certificados de cada firma válida
+  GET  /ui/certificates               UI de POST /certificates (una card por firma)
+  GET  /ui/verify                     UI de POST /verify (reporte de validación)
 
 Estructura:
   routers/    endpoints HTTP, uno por área
   services/   una clase por operación (firmar, verificar, extraer certificados), sin HTTP
+  static/     páginas de /ui y su CSS compartido (servido en /ui/static)
   pki.py      la mini PKI (certificados, CRLs, OCSP)
 """
 
@@ -22,9 +25,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import pki
-from .routers import certificates, ocsp, signing, tsa, verification
+from .routers import certificates, ocsp, signing, tsa, ui, verification
 from .routers import pki as pki_router
 from .services import UnprocessablePdf
 from .services.certificates import CertificateExtractor
@@ -44,8 +48,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
-for module in (pki_router, ocsp, tsa, signing, verification, certificates):
+for module in (pki_router, ocsp, tsa, signing, verification, certificates, ui):
     app.include_router(module.router)
+app.mount("/ui/static", StaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 
 
 @app.exception_handler(UnprocessablePdf)
@@ -55,7 +60,7 @@ def unprocessable_pdf(request: Request, exc: UnprocessablePdf) -> JSONResponse:
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse("/docs")
+    return RedirectResponse("/ui/certificates")
 
 
 def main() -> None:

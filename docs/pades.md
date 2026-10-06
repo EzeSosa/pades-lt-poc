@@ -47,6 +47,8 @@ Esta PoC levanta **todas las piezas de infraestructura** en una sola app FastAPI
 
 Al firmar, la app **se consulta a sí misma** por HTTP como si la TSA, el OCSP y las CRLs fueran servicios externos. Por eso `PUBLIC_BASE_URL` tiene que ser alcanzable desde el propio proceso.
 
+Además sirve una UI web (`/ui/certificates` y `/ui/verify`, ver el [README](../README.md#ui)) sobre `POST /certificates` y `POST /verify`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
+
 ---
 
 ## 2. Criptografía de base
@@ -572,6 +574,15 @@ Con PDFs reales firmados con iText aparecen tres casos:
 | `signature_timestamp` | Hora certificada por la TSA, quién la emitió y si ese sello es válido y confiable. |
 | `details` | Informe completo en texto de pyHanko. |
 
+### El reporte de `/ui/verify`
+
+La página traduce la respuesta a un reporte, sin recalcular nada:
+
+- **Resumen**: `pades_level`, cuántas firmas dan `bottom_line`, los contadores de `dss` (o un aviso si no hay DSS: sin revocación ninguna firma es confiable) y los modos de `validation_time` y `diff_policy`. Si la respuesta trae `validation_time.warning` o `diff_policy.note`, los muestra como advertencias.
+- **Una card por firma** con un veredicto (`bottom_line`) y una fila por campo de la tabla de arriba. `coverage` se muestra en verde tanto para `ENTIRE_FILE` como para `ENTIRE_REVISION`, porque lo segundo es lo normal en B-LT/B-LTA y lo agregado después lo juzga `modifications`. Un `modifications.suspicious` se muestra en rojo con el mensaje de pyHanko. Del firmante y de la TSA se destaca el *Common Name*.
+- Los `/DocTimeStamp` tienen su propia card, que aclara que no se validan por separado (ver abajo).
+- `details` va en un desplegable, que se omite al imprimir.
+
 ### Cómo se calcula `pades_level`
 
 Es una heurística de la PoC, no un validador ETSI completo:
@@ -620,6 +631,8 @@ Forma de la respuesta:
   ]
 }
 ```
+
+En `/ui/certificates` cada firma es una card con su cadena, con la del `signature_timestamp` en un desplegable aparte. La card marca la cadena como completa, incompleta (`chain_complete: false`) o completada por AIA (algún `source: "aia"`), y muestra los `aia_errors`. Cada certificado tiene dos botones, que trabajan sólo con `der_b64` y no vuelven a llamar a la API: uno lo decodifica y lo descarga como `<CN>.crt` (DER, `application/pkix-cert`), y el otro copia el base64 tal cual al portapapeles.
 
 ---
 
