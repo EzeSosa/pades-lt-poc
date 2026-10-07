@@ -35,6 +35,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Reserva siempre el lugar de la scrollbar: si no, al pasar de una pantalla corta a una
+   larga aparece la barra, se achica el ancho y el contenido centrado salta de lugar. */
+html { scrollbar-gutter: stable; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 'IBM Plex Sans', system-ui, sans-serif; }
 main { max-width: 1160px; margin: 0 auto; padding: 32px 16px 80px; display: flex; flex-direction: column; gap: 24px; }
 a { color: var(--accent); }
@@ -46,10 +49,10 @@ h1 { margin: 0; font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
 .eyebrow { font: 13px var(--mono); color: var(--muted); }
 .lead { margin: 6px 0 0; color: var(--muted); max-width: 680px; }
 .top-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.nav { display: flex; gap: 2px; padding: 3px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; }
-.nav a { display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; }
+.nav { display: flex; gap: 6px; padding: 4px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; }
+.nav a { display: inline-flex; align-items: center; min-height: 36px; padding: 0 16px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 500; text-decoration: none; }
 .nav a:hover { color: var(--ink); background: var(--line-soft); }
-.nav a[aria-current=page] { background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+.nav a[aria-current=page] { background: var(--accent-fill); color: var(--on-accent); }  /* sin negrita: cambiaría el ancho y el nav se correría entre pantallas */
 
 /* --------------------------------------------------------------------------- formularios */
 form, .panel-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; }
@@ -78,7 +81,7 @@ button { font: inherit; font-weight: 500; min-height: 44px; border-radius: 8px; 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 [role=tab] { display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); font-weight: 500; white-space: nowrap; margin-bottom: -1px; }
 [role=tab]:hover { color: var(--ink); background: var(--line-soft); }
-[role=tab][aria-selected=true] { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent-fill); }
+[role=tab][aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent-fill); }  /* sin negrita: correría las otras tabs */
 .tab-count { font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--chip); color: var(--chip-fg); }
 .tab-count:empty { display: none; }
 [role=tabpanel] { display: flex; flex-direction: column; gap: 20px; }
