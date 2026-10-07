@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspector de certificados</title>
+<script>
+  // Antes de pintar, para que no parpadee: el tema elegido a mano (si hay) gana al del sistema.
+  try {
+    const theme = localStorage.getItem("ui-theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  } catch {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/ui/static/ui.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <div class="eyebrow">POST /certificates/inspect</div>
+      <h1>Inspector de certificados</h1>
+      <p class="lead">Subí un certificado suelto o pegá su base64 o PEM, y mirá a quién identifica, quién lo emitió, hasta cuándo vale y para qué se puede usar.</p>
+    </div>
+    <div class="top-actions">
+      <nav class="nav" aria-label="Pantallas">
+        <a href="/ui/firmas">Firmas</a>
+        <a href="/ui/certificado" aria-current="page">Certificado</a>
+      </nav>
+      <a class="secondary" href="/docs" target="_blank" rel="noopener">API ↗</a>
+      <button type="button" class="secondary icon-button" id="theme"></button>
+    </div>
+  </header>
+
+  <form id="form" class="cert-input">
+    <div class="cert-sources">
+      <label class="field">
+        <span>Archivo</span>
+        <span class="dropzone" id="dropzone">
+          <input type="file" name="crt" accept=".crt,.cer,.der,.pem,.p7c,.p7b,application/pkix-cert,application/x-x509-ca-cert">
+          <span class="sub">.crt, .cer, .pem o PKCS#7 (.p7c). También podés soltarlo acá.</span>
+        </span>
+      </label>
+      <span class="or" aria-hidden="true">o</span>
+      <label class="field">
+        <span>Base64 o PEM</span>
+        <textarea name="b64" spellcheck="false" placeholder="MIIF… o -----BEGIN CERTIFICATE-----"></textarea>
+      </label>
+    </div>
+    <div class="form-actions">
+      <span class="status" id="status" role="status" aria-live="polite"></span>
+      <button type="button" class="secondary" id="clear">Limpiar</button>
+      <button class="primary" type="submit">Ver certificado</button>
+    </div>
+  </form>
+
+  <div class="results" id="out"></div>
+</main>
+
+<script src="/ui/static/ui.js"></script>
+<script src="/ui/static/inspect.js"></script>
+<script src="/ui/static/certificado.js"></script>
+</body>
+</html>

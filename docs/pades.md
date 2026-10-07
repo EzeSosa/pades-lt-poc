@@ -47,7 +47,7 @@ Esta PoC levanta **todas las piezas de infraestructura** en una sola app FastAPI
 
 Al firmar, la app **se consulta a sí misma** por HTTP como si la TSA, el OCSP y las CRLs fueran servicios externos. Por eso `PUBLIC_BASE_URL` tiene que ser alcanzable desde el propio proceso.
 
-Además sirve una UI web (`/ui/certificates` y `/ui/verify`, ver el [README](../README.md#ui)) sobre `POST /certificates` y `POST /verify`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
+Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se sube el PDF una vez y tres tabs muestran lo que devuelven `POST /certificates`, `POST /verify` y `POST /certificates/inspect`. Un certificado suelto se inspecciona aparte, en `/ui/certificado`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
 
 ---
 
@@ -574,7 +574,7 @@ Con PDFs reales firmados con iText aparecen tres casos:
 | `signature_timestamp` | Hora certificada por la TSA, quién la emitió y si ese sello es válido y confiable. |
 | `details` | Informe completo en texto de pyHanko. |
 
-### El reporte de `/ui/verify`
+### El reporte de la UI (tab Verificación)
 
 La página traduce la respuesta a un reporte, sin recalcular nada:
 
@@ -632,7 +632,21 @@ Forma de la respuesta:
 }
 ```
 
-En `/ui/certificates` cada firma es una card con su cadena, con la del `signature_timestamp` en un desplegable aparte. La card marca la cadena como completa, incompleta (`chain_complete: false`) o completada por AIA (algún `source: "aia"`), y muestra los `aia_errors`. Cada certificado tiene dos botones, que trabajan sólo con `der_b64` y no vuelven a llamar a la API: uno lo decodifica y lo descarga como `<CN>.crt` (DER, `application/pkix-cert`), y el otro copia el base64 tal cual al portapapeles.
+En la tab Certificados de la UI cada firma es una card con su cadena, con la del `signature_timestamp` en un desplegable aparte. La card marca la cadena como completa, incompleta (`chain_complete: false`) o completada por AIA (algún `source: "aia"`), y muestra los `aia_errors`. Cada certificado tiene tres botones, que trabajan sólo con `der_b64`:
+
+- **Ver detalle** pasa a la tab Inspección con ese certificado elegido, y manda su `der_b64` a `/certificates/inspect`. En esa tab, un selector lista todos los certificados del PDF sin repetir (la intermedia suele estar en varias cadenas).
+- **Descargar .crt** lo decodifica y lo descarga como `<CN>.crt` (DER, `application/pkix-cert`).
+- **Copiar base64** lo copia tal cual al portapapeles.
+
+### Detalle de un certificado: `POST /certificates/inspect`
+
+Recibe un certificado y lo describe campo por campo. Sirve para mirar los certificados que salen de `/certificates`, los que publica una CA por AIA o cualquier `.crt` suelto. No evalúa confianza ni revocación: sólo lee lo que dice el certificado.
+
+- **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa `_parse_certs`, el mismo parser de las descargas AIA. Si no es nada de eso, `422`.
+- **Sujeto y emisor**: atributo por atributo, en el orden del DER, con su OID. En la PKI argentina el CUIL/CUIT del titular va en `serialNumber` (`"CUIT 30680604572"`), y la tab Inspección de la UI lo destaca.
+- **`validity`**: `not_before`, `not_after`, `status` (`valid`, `expired`, `not_yet_valid`) y `days_left` respecto de la hora actual.
+- **`is_ca`** (de BasicConstraints) y **`self_signed`** (con la misma verificación de firma que el armado de cadenas, así que acepta SHA-1).
+- **`extensions`**: cada una con `oid`, `name`, `critical` y `values`, una lista de líneas de texto. Se interpretan KU, EKU, BasicConstraints, AIA, CDP, políticas (cada CPS y aviso en su propia línea), SAN, SKI/AKI y OCSP no-check. Las que `cryptography` no conoce se decodifican si son un ASN.1 simple (texto, entero u octet string) y si no van en hex. Las de Microsoft AD CS que traen las CAs de la PKI argentina (`msCertificateTemplateName`, `msCAVersion`, `msPreviousCACertHash`) se nombran.
 
 ---
 

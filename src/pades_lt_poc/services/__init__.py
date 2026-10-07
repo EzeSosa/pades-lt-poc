@@ -5,8 +5,16 @@ from io import BytesIO
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 
-class UnprocessablePdf(Exception):
-    """El PDF no se puede procesar (sin firmas, no se pudo firmar, etc.). La API lo devuelve como 422."""
+class UnprocessableInput(Exception):
+    """La entrada no se puede procesar. La API lo devuelve como 422."""
+
+
+class UnprocessablePdf(UnprocessableInput):
+    """El PDF no se puede procesar (sin firmas, no se pudo firmar, etc.)."""
+
+
+class UnprocessableCertificate(UnprocessableInput):
+    """Lo recibido no es un certificado en un formato conocido."""
 
 
 def read_signed_pdf(data: bytes) -> PdfFileReader:

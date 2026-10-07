@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspector de firmas PAdES</title>
+<script>
+  // Antes de pintar, para que no parpadee: el tema elegido a mano (si hay) gana al del sistema.
+  try {
+    const theme = localStorage.getItem("ui-theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  } catch {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/ui/static/ui.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <div class="eyebrow">PoC PAdES B-LT</div>
+      <h1>Inspector de firmas PAdES</h1>
+      <p class="lead">Subí un PDF firmado una vez y recorré la cadena de certificados de cada firma, el reporte de verificación y el detalle de cada uno de sus certificados.</p>
+    </div>
+    <div class="top-actions">
+      <nav class="nav" aria-label="Pantallas">
+        <a href="/ui/firmas" aria-current="page">Firmas</a>
+        <a href="/ui/certificado">Certificado</a>
+      </nav>
+      <a class="secondary" href="/docs" target="_blank" rel="noopener">API ↗</a>
+      <button type="button" class="secondary icon-button" id="theme"></button>
+    </div>
+  </header>
+
+  <form id="pdf-form">
+    <label class="field grow">
+      <span>PDF firmado</span>
+      <input type="file" id="pdf" accept="application/pdf">
+    </label>
+    <span class="status" id="pdf-status" role="status" aria-live="polite"></span>
+    <button type="button" class="secondary" id="pdf-clear" hidden>Quitar</button>
+  </form>
+
+  <div class="tabs" role="tablist" aria-label="Resultados">
+    <button type="button" role="tab" id="tab-certificados" aria-controls="panel-certificados">Certificados <span class="tab-count" id="count-certificados"></span></button>
+    <button type="button" role="tab" id="tab-verificacion" aria-controls="panel-verificacion">Verificación <span class="tab-count" id="count-verificacion"></span></button>
+    <button type="button" role="tab" id="tab-inspeccion" aria-controls="panel-inspeccion">Inspección <span class="tab-count" id="count-inspeccion"></span></button>
+  </div>
+
+  <section role="tabpanel" id="panel-certificados" aria-labelledby="tab-certificados" hidden>
+    <div class="panel-bar">
+      <label class="check">
+        <input type="checkbox" id="fetch-missing" checked>
+        <span>Completar la cadena por AIA</span>
+      </label>
+      <span class="spacer"></span>
+      <span class="status" id="certificados-status" role="status" aria-live="polite"></span>
+      <span class="eyebrow">POST /certificates</span>
+    </div>
+    <div class="results" id="certificados-out"></div>
+  </section>
+
+  <section role="tabpanel" id="panel-verificacion" aria-labelledby="tab-verificacion" hidden>
+    <div class="panel-bar">
+      <label class="field">
+        <span>Hora de validación</span>
+        <select id="validation-time">
+          <option value="now">Ahora</option>
+          <option value="claimed_signing_time">Hora declarada por cada firma</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Análisis de modificaciones</span>
+        <select id="diff-policy">
+          <option value="default">pyHanko por defecto</option>
+          <option value="allow_unallocated_free_entries">Tolerar entradas libres sin asignar</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <span class="eyebrow">POST /verify</span>
+    </div>
+    <div class="results" id="verificacion-out"></div>
+  </section>
+
+  <section role="tabpanel" id="panel-inspeccion" aria-labelledby="tab-inspeccion" hidden>
+    <div class="panel-bar">
+      <label class="field picker">
+        <span>Certificado del PDF</span>
+        <select id="cert-picker" disabled>
+          <option value="">Subí un PDF para elegir uno de sus certificados</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <span class="status" id="inspeccion-status" role="status" aria-live="polite"></span>
+      <span class="eyebrow">POST /certificates/inspect</span>
+    </div>
+    <div class="results" id="inspeccion-out"></div>
+  </section>
+</main>
+
+<script src="/ui/static/ui.js"></script>
+<script src="/ui/static/certificates.js"></script>
+<script src="/ui/static/verify.js"></script>
+<script src="/ui/static/inspect.js"></script>
+<script src="/ui/static/firmas.js"></script>
+</body>
+</html>

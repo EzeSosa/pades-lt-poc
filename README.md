@@ -1,6 +1,6 @@
 # PoC PAdES B-LT con FastAPI + pyHanko
 
-Firma PDFs en **PAdES B-LT** (opcionalmente **B-LTA**) usando una mini PKI de dos niveles, un respondedor OCSP y una TSA RFC 3161, todo servido por la misma app. Trae además una UI web para inspeccionar PDFs firmados: extraer la cadena de certificados de cada firma y ver un reporte de validación.
+Firma PDFs en **PAdES B-LT** (opcionalmente **B-LTA**) usando una mini PKI de dos niveles, un respondedor OCSP y una TSA RFC 3161, todo servido por la misma app. Trae además una UI web para inspeccionar PDFs firmados: la cadena de certificados de cada firma, un reporte de validación y el detalle de cada certificado.
 
 Para entender los conceptos (PKI, CRL, OCSP, TSA, CMS, DSS, niveles PAdES) y cómo se aplican en el código, ver [docs/pades.md](docs/pades.md).
 
@@ -42,16 +42,24 @@ uv run python scripts/demo.py --lta  # idem, en B-LTA
 
 ## UI
 
-Abrir <http://127.0.0.1:8000> lleva a la UI. Son dos páginas que llaman a la API desde el navegador:
+Abrir <http://127.0.0.1:8000> lleva a la UI. Son dos pantallas, con una navegación arriba para pasar de una a otra en la misma pestaña:
 
-| Página | Endpoint | Qué muestra |
-|--------|----------|-------------|
-| `/ui/certificates` | `POST /certificates` | Una card por firma (incluidos los DocTimeStamp) con su cadena hoja → raíz y, aparte, la de la TSA que la selló. Cada certificado tiene un botón para **descargar el `.crt`** (DER) y otro para **copiar su base64** al portapapeles. |
-| `/ui/verify` | `POST /verify` | Un reporte: nivel PAdES alcanzado, contenido del DSS y modo de validación, y una card por firma con integridad, confianza, cobertura, modificaciones, sello de tiempo y el detalle de pyHanko. Se puede **imprimir o guardar como PDF**. |
+- **`/ui/firmas`**: se sube el PDF firmado **una vez** y sus resultados quedan en tres tabs, así que moverse entre ellas no pierde nada. Al elegir el PDF se llama en paralelo a `POST /certificates` y `POST /verify`, y cada tab muestra un resumen en su etiqueta (cantidad de firmas, nivel PAdES, cantidad de certificados).
+- **`/ui/certificado`**: un certificado que no viene en un PDF. Se sube un `.crt`/`.cer`/`.pem`/`.p7c` (o se suelta sobre la zona del archivo), o se pega su base64 o PEM, y muestra el mismo reporte que la tab Inspección.
 
-Los formularios exponen las mismas opciones que la API (`fetch_missing`, `validation_time`, `diff_policy`). El link **API** abre el Swagger (`/docs`) en otra pestaña.
+| Tab de `/ui/firmas` | Endpoint | Qué muestra |
+|-----|----------|-------------|
+| Certificados | `POST /certificates` | Una card por firma (incluidos los DocTimeStamp) con su cadena hoja → raíz y, aparte, la de la TSA que la selló. Cada certificado tiene botones para **ver su detalle** (en la tab Inspección), **descargar el `.crt`** (DER) y **copiar su base64** al portapapeles. |
+| Verificación | `POST /verify` | Un reporte: nivel PAdES alcanzado, contenido del DSS y modo de validación, y una card por firma con integridad, confianza, cobertura, modificaciones, sello de tiempo y el detalle de pyHanko. Se puede **imprimir o guardar como PDF**. |
+| Inspección | `POST /certificates/inspect` | El detalle de un certificado: sujeto y emisor (destacando el CUIL/CUIT de la PKI argentina), vigencia con los días que quedan, clave, huellas SHA-256 y SHA-1, y todas las extensiones legibles. Se elige entre los certificados del PDF (sin repetir), o desde «Ver detalle» en Certificados. |
 
-Son HTML estáticos, sin build ni dependencias: viven en `src/pades_lt_poc/static/` junto con el CSS que comparten. Para copiar al portapapeles el navegador exige un contexto seguro (HTTPS o `localhost`). Si la app se sirve por IP sin HTTPS, la página usa un método alternativo que puede no estar disponible en todos los navegadores.
+Cada tab expone las opciones de su endpoint (`fetch_missing`, `validation_time`, `diff_policy`); al cambiarlas se vuelve a pedir sólo esa tab, con el mismo PDF. La tab activa queda en la URL (`/ui/firmas#verificacion`). El link **API** abre el Swagger (`/docs`) en otra pestaña.
+
+**Lo analizado se guarda en el navegador** (IndexedDB, que admite archivos enteros): el PDF con sus opciones, la tab y el certificado que se estaba inspeccionando, y en `/ui/certificado` el último certificado. Al volver a una pantalla, o al recargarla, el archivo reaparece elegido y se vuelve a analizar. **Quitar** (en firmas) y **Limpiar** (en certificado) lo borran. Nada sale del navegador salvo los pedidos a la propia API; sin almacenamiento disponible (p. ej. una ventana privada) la UI anda igual, sólo que no recuerda.
+
+Tiene **tema claro y oscuro**: por defecto sigue al sistema, y el botón de arriba a la derecha lo fija (se recuerda en el navegador). El acento es el naranja de Claude. Al imprimir siempre sale en claro.
+
+Es HTML estático, sin build ni dependencias, en `src/pades_lt_poc/static/`: una página por pantalla (`firmas.html`, `certificado.html`) con su script (`firmas.js`, `certificado.js`), `ui.css`, `ui.js` (helpers compartidos: tema, guardado, descarga y copia) y un script por tab (`certificates.js`, `verify.js`, `inspect.js`; el último también lo usa `/ui/certificado`). Para copiar al portapapeles el navegador exige un contexto seguro (HTTPS o `localhost`). Si la app se sirve por IP sin HTTPS, la página usa un método alternativo que puede no estar disponible en todos los navegadores.
 
 ## Tests
 
@@ -89,11 +97,12 @@ src/pades_lt_poc/
 │   ├── signing.py        PdfSigner            (/sign)
 │   ├── verification.py   SignatureVerifier    (/verify) + políticas de algoritmos y de modificaciones
 │   ├── certificates.py   CertificateExtractor (/certificates) + armado de cadenas y descarga AIA
+│   ├── inspection.py     CertificateInspector (/certificates/inspect): detalle legible de un certificado
 │   └── timestamping.py   motor de la TSA      (/tsa)
-└── static/           la UI: certificates.html, verify.html y ui.css (servido en /ui/static)
+└── static/           la UI: firmas.html y certificado.html con sus scripts, ui.css, ui.js y un JS por tab (servidos en /ui/static)
 ```
 
-Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar, y la app lo devuelve como `422`.
+Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar y `UnprocessableCertificate` cuando lo recibido no es un certificado. La app devuelve los dos como `422`.
 
 ## Endpoints
 
@@ -105,7 +114,8 @@ Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar, y la
 - `POST /sign`: recibe `pdf` (archivo), `reason`, `location` y `lta` (bool). Re-firmar un PDF ya firmado agrega `Firma2`, `Firma3`, etc.
 - `POST /verify`: valida **offline** (sin descargar nada y con revocación `hard-fail`) usando sólo lo que viene en el DSS. Que pase esta validación demuestra que la firma es LT. Confía en la raíz de la PoC y en las de `src/pades_lt_poc/trust/` (las AC Raíz de Argentina de 2007 y 2016), aceptando SHA-1 sólo en lo que firma la raíz de 2007. Valida a la hora actual; con `validation_time=claimed_signing_time` valida cada firma a la hora que ella misma declara (no probada), y la respuesta lo indica en `validation_time` y en el `validated_at` de cada firma. Cada firma trae en `modifications` el análisis de los cambios posteriores (si es sospechoso, `bottom_line` da `false`); con `diff_policy=allow_unallocated_free_entries` se toleran las entradas libres de objetos que nunca existieron, que iText genera a veces.
 - `POST /certificates`: recibe `pdf` y, por cada firma (incluidos los DocTimeStamp) **criptográficamente válida**, devuelve la cadena hoja → raíz armada con los certificados del propio PDF (CMS + DSS). Si el PDF no trae algún emisor (es habitual que sólo embeba el del firmante), lo descarga de la URL **AIA caIssuers** del certificado; se desactiva con `fetch_missing=false`. Cada certificado trae `type` (`end_entity`, `intermediate`, `root`), `source` (`cms`, `dss` o `aia`), `self_signed` y `der_b64` (el `.crt` en DER, base64). Cada firma incluye también `signature_timestamp`, con la hora y la cadena de la TSA que la selló. No exige confianza: también extrae cadenas de PKIs ajenas.
-- `GET /`: redirige a `/ui/certificates`. `GET /ui/certificates` y `GET /ui/verify` son las páginas de la [UI](#ui), y `GET /docs` es el Swagger.
+- `POST /certificates/inspect`: recibe un archivo `crt` (DER, PEM o PKCS#7) **o** un campo `b64` (el base64 de un DER, como el `der_b64` de `/certificates`, o un PEM), uno solo de los dos. Devuelve en `certificates` el detalle de cada certificado: sujeto y emisor atributo por atributo, `validity` (con `status` `valid`/`expired`/`not_yet_valid` y `days_left`), `is_ca`, `self_signed`, algoritmo de firma, clave pública, huellas y `extensions` (cada una con `oid`, `name`, `critical` y sus `values` como texto).
+- `GET /ui/firmas` y `GET /ui/certificado`: las pantallas de la [UI](#ui). `GET /` y `GET /ui` redirigen a `/ui/firmas`, y `GET /docs` es el Swagger.
 
 Para verificar el respondedor OCSP con una implementación independiente:
 

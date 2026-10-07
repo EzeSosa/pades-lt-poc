@@ -1,83 +1,4 @@
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reporte de verificación</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/ui/static/ui.css">
-<style>
-  #report { display: flex; flex-direction: column; gap: 20px; }
-  #report:empty { display: none; }
-  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .overview > div { background: var(--surface); padding: 18px 22px; display: flex; flex-direction: column; gap: 4px; }
-  .overview .label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .overview .value { font-size: 18px; font-weight: 600; }
-  .overview .level { font-size: 28px; letter-spacing: -0.01em; }
-  .overview .sub { font-size: 13px; color: var(--muted); }
-  .callout { border-radius: 10px; padding: 14px 18px; font-size: 14px; }
-  .callout strong { display: block; margin-bottom: 2px; }
-  .facts { margin: 0; display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
-  .facts dt, .facts dd { margin: 0; padding: 12px 22px; border-top: 1px solid #F0F1F4; }
-  .facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: 0; }
-  .facts dt { font-size: 13px; font-weight: 500; color: var(--muted); }
-  .facts dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
-  .facts .sub { font-size: 13px; color: var(--muted); }
-  .suspicious { flex-basis: 100%; font: 13px var(--mono); color: var(--bad-fg); overflow-wrap: anywhere; }
-  .card-note { margin: 0; padding: 18px 22px; color: var(--muted); }
-  pre { margin: 0; padding: 16px 22px; background: var(--surface); border-top: 1px solid var(--line-soft); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }
-  @media (max-width: 640px) {
-    .facts { grid-template-columns: minmax(0, 1fr); }
-    .facts dt { padding-bottom: 0; }
-    .facts dd { border-top: 0; padding-top: 4px; }
-  }
-  @media print {
-    details { display: none; }
-  }
-</style>
-</head>
-<body>
-<main>
-  <nav aria-label="Herramientas">
-    <a href="/ui/certificates">Certificados</a>
-    <a href="/ui/verify" aria-current="page">Verificación</a>
-    <a href="/docs" target="_blank" rel="noopener">API ↗</a>
-  </nav>
-
-  <header>
-    <div class="eyebrow">POST /verify</div>
-    <h1>Reporte de verificación</h1>
-    <p class="lead">Valida las firmas offline, usando sólo lo que el PDF trae embebido en su DSS (certificados, CRLs y respuestas OCSP). Si pasa, la firma es LT.</p>
-  </header>
-
-  <form id="form">
-    <label class="field grow">
-      <span>PDF firmado</span>
-      <input type="file" name="pdf" accept="application/pdf" required>
-    </label>
-    <label class="field">
-      <span>Hora de validación</span>
-      <select name="validation_time">
-        <option value="now">Ahora</option>
-        <option value="claimed_signing_time">Hora declarada por cada firma</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Análisis de modificaciones</span>
-      <select name="diff_policy">
-        <option value="default">pyHanko por defecto</option>
-        <option value="allow_unallocated_free_entries">Tolerar entradas libres sin asignar</option>
-      </select>
-    </label>
-    <button class="primary" type="submit">Verificar</button>
-  </form>
-
-  <div id="report"></div>
-</main>
-
-<script>
-const $ = (sel, root = document) => root.querySelector(sel);
+// Tab Verificación: reporte de POST /verify.
 
 const COVERAGE = {
   ENTIRE_FILE: ["Todo el archivo", "ok", null],
@@ -93,17 +14,6 @@ const MODIFICATIONS = {
   OTHER: ["Otros cambios", "bad"],
 };
 
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
-}
-
-function badge(text, tone) {
-  return el("span", `badge ${tone}`, text);
-}
-
 function yesNo(value, yes, no) {
   return value ? badge(yes, "ok") : badge(no, "bad");
 }
@@ -112,10 +22,6 @@ function commonName(humanFriendly) {
   // pyHanko: "Common Name: Firmante de Prueba, Organization: PoC PAdES, Country: AR"
   const match = /Common Name: (.*?)(?:, [A-Z][\w ]*: |$)/.exec(humanFriendly);
   return match ? match[1] : humanFriendly;
-}
-
-function when(iso) {
-  return new Date(iso).toISOString().replace("T", " ").replace(/\.\d+Z$|Z$/, " UTC");
 }
 
 function overviewCell(label, value, sub, valueClass = "value") {
@@ -153,17 +59,7 @@ function callout(tone, title, text) {
   return box;
 }
 
-function facts(rows) {
-  const dl = el("dl", "facts");
-  for (const [term, ...content] of rows) {
-    const dd = el("dd");
-    dd.append(...content.filter(Boolean));
-    dl.append(el("dt", null, term), dd);
-  }
-  return dl;
-}
-
-function signatureCard(sig) {
+function signatureReportCard(sig) {
   const article = el("article");
   const head = el("div", "card-head");
   head.append(el("h3", null, sig.field));
@@ -225,7 +121,7 @@ function signatureCard(sig) {
   return article;
 }
 
-function report(fileName, body) {
+function renderReport(fileName, body) {
   const fragment = document.createDocumentFragment();
   const sigs = body.signatures.filter((s) => s.type === "Signature");
 
@@ -233,44 +129,14 @@ function report(fileName, body) {
   const print = el("button", "secondary no-print", "Imprimir / guardar PDF");
   print.type = "button";
   print.addEventListener("click", () => window.print());
-  title.append(el("h2", null, fileName), print);
+  title.append(el("h2", null, `Reporte de verificación · ${fileName}`), print);
   fragment.append(title, overview(body, sigs));
 
   if (body.validation_time.warning) fragment.append(callout("warn", "Validado a la hora declarada", body.validation_time.warning));
   if (body.diff_policy.note) fragment.append(callout("warn", "Análisis de modificaciones relajado", body.diff_policy.note));
 
   const cards = el("div", "cards");
-  cards.append(...body.signatures.map(signatureCard));
+  cards.append(...body.signatures.map(signatureReportCard));
   fragment.append(cards);
   return fragment;
 }
-
-$("#form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const file = form.pdf.files[0];
-  const body = new FormData(form);
-
-  const button = $("button[type=submit]", form);
-  button.disabled = true;
-  button.textContent = "Verificando…";
-  const out = $("#report");
-  out.replaceChildren();
-  try {
-    const response = await fetch("/verify", { method: "POST", body });
-    const data = await response.json();
-    if (!response.ok) {
-      const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
-      throw new Error(detail || `HTTP ${response.status}`);
-    }
-    out.append(report(file.name, data));
-  } catch (error) {
-    out.append(el("div", "error-box", `No se pudo verificar el PDF: ${error.message}`));
-  } finally {
-    button.disabled = false;
-    button.textContent = "Verificar";
-  }
-});
-</script>
-</body>
-</html>

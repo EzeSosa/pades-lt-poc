@@ -11,13 +11,14 @@ Endpoints:
   POST /sign                          sube un PDF, devuelve el PDF firmado PAdES B-LT
   POST /verify                        valida offline usando sólo el DSS embebido
   POST /certificates                  extrae la cadena de certificados de cada firma válida
-  GET  /ui/certificates               UI de POST /certificates (una card por firma)
-  GET  /ui/verify                     UI de POST /verify (reporte de validación)
+  POST /certificates/inspect          detalle de un certificado (DER, PEM, PKCS#7 o base64)
+  GET  /ui/firmas                     UI: un PDF, tres tabs (certificados, verificación e inspección)
+  GET  /ui/certificado                UI de un certificado suelto (mismo reporte que la tab Inspección)
 
 Estructura:
   routers/    endpoints HTTP, uno por área
-  services/   una clase por operación (firmar, verificar, extraer certificados), sin HTTP
-  static/     páginas de /ui y su CSS compartido (servido en /ui/static)
+  services/   una clase por operación (firmar, verificar, extraer e inspeccionar certificados), sin HTTP
+  static/     las páginas de /ui, su CSS y un JS por tab (servidos en /ui/static)
   pki.py      la mini PKI (certificados, CRLs, OCSP)
 """
 
@@ -30,8 +31,9 @@ from fastapi.staticfiles import StaticFiles
 from . import pki
 from .routers import certificates, ocsp, signing, tsa, ui, verification
 from .routers import pki as pki_router
-from .services import UnprocessablePdf
+from .services import UnprocessableInput
 from .services.certificates import CertificateExtractor
+from .services.inspection import CertificateInspector
 from .services.signing import PdfSigner
 from .services.timestamping import load_tsa
 from .services.verification import SignatureVerifier
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI):
     app.state.signer = PdfSigner.from_pki()
     app.state.verifier = SignatureVerifier.from_pki()
     app.state.certificate_extractor = CertificateExtractor()
+    app.state.certificate_inspector = CertificateInspector()
     yield
 
 
@@ -53,14 +56,14 @@ for module in (pki_router, ocsp, tsa, signing, verification, certificates, ui):
 app.mount("/ui/static", StaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 
 
-@app.exception_handler(UnprocessablePdf)
-def unprocessable_pdf(request: Request, exc: UnprocessablePdf) -> JSONResponse:
+@app.exception_handler(UnprocessableInput)
+def unprocessable_input(request: Request, exc: UnprocessableInput) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse("/ui/certificates")
+    return RedirectResponse("/ui/firmas")
 
 
 def main() -> None:
