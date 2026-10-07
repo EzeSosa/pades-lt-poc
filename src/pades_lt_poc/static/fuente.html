@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fuente de certificados</title>
+<script>
+  // Antes de pintar, para que no parpadee: el tema elegido a mano (si hay) gana al del sistema.
+  try {
+    const theme = localStorage.getItem("ui-theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  } catch {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/ui/static/ui.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <div class="eyebrow">/store/certificates</div>
+      <h1>Fuente de certificados</h1>
+      <p class="lead">Las raíces y los intermedios que usa el validador además de lo que trae cada PDF: las raíces confiables son las anclas de confianza, y los intermedios completan cadenas que el PDF no trae.</p>
+    </div>
+    <div class="top-actions">
+      <nav class="nav" aria-label="Pantallas">
+        <a href="/ui/firmas">Firmas</a>
+        <a href="/ui/certificado">Certificado</a>
+        <a href="/ui/fuente" aria-current="page">Fuente</a>
+      </nav>
+      <a class="secondary" href="/docs" target="_blank" rel="noopener">API ↗</a>
+      <button type="button" class="secondary icon-button" id="theme"></button>
+    </div>
+  </header>
+
+  <section class="overview" id="summary" aria-label="Resumen"></section>
+
+  <div class="panel-bar add-hint">
+    <p>Para <strong>agregar</strong> un certificado, inspeccionalo en <a href="/ui/certificado">Certificado</a> (o desde «Ver detalle» en <a href="/ui/firmas">Firmas</a>) y usá <strong>Agregar a la fuente</strong>: así se ve qué es antes de confiar en él.</p>
+    <span class="status" id="seed-status" role="status" aria-live="polite"></span>
+    <button type="button" class="secondary" id="seed">Restaurar carga inicial</button>
+  </div>
+
+  <section class="results">
+    <div class="panel-bar">
+      <div class="segmented" role="group" aria-label="Filtrar por tipo">
+        <button type="button" data-kind="all" aria-pressed="true">Todos</button>
+        <button type="button" data-kind="root" aria-pressed="false">Raíces</button>
+        <button type="button" data-kind="intermediate" aria-pressed="false">Intermedios</button>
+      </div>
+      <label class="field grow">
+        <span>Buscar</span>
+        <input type="search" id="search" placeholder="Sujeto, emisor o notas">
+      </label>
+      <span class="status" id="list-count"></span>
+      <span class="status" id="list-status" role="status" aria-live="polite"></span>
+    </div>
+    <article>
+      <ol class="chain store-list" id="list"></ol>
+    </article>
+  </section>
+</main>
+
+<script src="/ui/static/ui.js"></script>
+<script src="/ui/static/inspect.js"></script>
+<script src="/ui/static/fuente.js"></script>
+</body>
+</html>

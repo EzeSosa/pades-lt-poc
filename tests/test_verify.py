@@ -2,24 +2,22 @@
 
 import datetime as dt
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 from conftest import load_signer, sign
+from pades_lt_poc.services.store import SEED_DIR
 from pades_lt_poc.services.verification import (
     CLAIMED_TIME_WARNING,
-    TRUST_DIR,
     UNALLOCATED_FREES_NOTE,
     LegacyRootsPolicy,
 )
 
-DATA = Path(__file__).parent / "data"
-AC_RAIZ_2007 = load_cert_from_pemder(str(TRUST_DIR / "ac-raiz-argentina-2007.der"))
-AC_RAIZ_2016 = load_cert_from_pemder(str(TRUST_DIR / "ac-raiz-argentina-2016.der"))
-ONTI = load_cert_from_pemder(str(DATA / "ac-onti-firma-digital.der"))
+AC_RAIZ_2007 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2007.der"))
+AC_RAIZ_2016 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2016.der"))
+ONTI = load_cert_from_pemder(str(SEED_DIR / "ac-onti-firma-digital.der"))
 
 
 def verify(client, pdf: bytes, **data):
@@ -28,15 +26,17 @@ def verify(client, pdf: bytes, **data):
 
 # --------------------------------------------------------------------------- anclas
 def test_verify_trusts_poc_root_and_both_ac_raiz(client):
-    roots = [c.dump() for c in client.app.state.verifier.trust_roots]
+    """La raíz de la PoC es implícita; las AC Raíz vienen de la carga inicial de la fuente."""
+    roots = [c.dump() for c in client.app.state.verifier.trust_roots()]
     assert roots[0] == client.app.state.signer.trust_root.dump()
     assert AC_RAIZ_2007.dump() in roots
     assert AC_RAIZ_2016.dump() in roots
+    assert ONTI.dump() not in roots  # un intermedio nunca es ancla de confianza
 
 
 def test_sha1_exemption_only_for_roots_born_with_sha1(client):
     """La de 2007 firma con SHA-1; la de 2016, con SHA-512, no necesita la excepción."""
-    legacy = client.app.state.verifier.algorithm_policy._legacy_keys
+    legacy = client.app.state.verifier.algorithm_policy()._legacy_keys
     assert legacy == {AC_RAIZ_2007.public_key.dump()}
 
 

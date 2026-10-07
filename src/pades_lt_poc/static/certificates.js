@@ -1,15 +1,35 @@
 // Tab Certificados: una card por firma con su cadena (respuesta de POST /certificates).
 
 const ROLES = { end_entity: "Firmante", intermediate: "Intermedia", root: "Raíz" };
+const SOURCES = {
+  cms: ["cms", "Embebido en la firma (CMS)"],
+  dss: ["dss", "Embebido en el DSS del PDF"],
+  store: ["fuente", "No viene en el PDF: salió de la fuente de certificados"],
+  aia: ["aia", "No viene en el PDF: se descargó de la URL AIA caIssuers"],
+};
+
+const inStoreChip = () => el("span", "chip in-store", "En la fuente");
+
+// Las CAs se agregan a la fuente desde el reporte de inspección («Ver detalle»); acá sólo
+// se indica si ya están. Cuando se agrega una, se marcan todas sus apariciones (la misma
+// CA suele estar en varias cadenas: firma, sello y sello de documento).
+document.addEventListener("store:added", (event) => {
+  for (const title of document.querySelectorAll(`.cert-title[data-sha="${event.detail.sha256}"]`)) {
+    if (!title.querySelector(".in-store")) title.append(inStoreChip());
+  }
+});
 
 function certRow(cert, hooks) {
   const row = el("li");
   const info = el("div", "cert-info");
 
   const title = el("div", "cert-title");
-  const source = el("span", "source", cert.source);
-  source.title = "Origen del certificado";
+  title.dataset.sha = cert.sha256_fingerprint;
+  const [sourceLabel, sourceHelp] = SOURCES[cert.source] || [cert.source, ""];
+  const source = el("span", `source${cert.source === "store" ? " from-store" : ""}`, sourceLabel);
+  source.title = sourceHelp;
   title.append(el("span", "role", ROLES[cert.type]), el("span", "cn", cn(cert.subject)), source);
+  if (cert.in_store) title.append(inStoreChip());
 
   const meta = el("div", "meta");
   meta.append(
@@ -40,6 +60,7 @@ function chainList(certs, hooks) {
 function chainBadge(entry) {
   if (!entry.chain_complete) return badge("Cadena incompleta", "warn");
   if (entry.certificates.some((c) => c.source === "aia")) return badge("Completada por AIA", "warn");
+  if (entry.certificates.some((c) => c.source === "store")) return badge("Completada con la fuente", "warn");
   return badge("Cadena completa", "ok");
 }
 

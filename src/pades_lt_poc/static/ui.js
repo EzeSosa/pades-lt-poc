@@ -9,6 +9,8 @@ function el(tag, className, text) {
   return node;
 }
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 function badge(text, tone) {
   return el("span", `badge ${tone}`, text);
 }
@@ -38,15 +40,23 @@ function when(iso) {
   return new Date(iso).toISOString().replace("T", " ").replace(/\.\d+Z$|Z$/, " UTC");
 }
 
-// POST de un formulario a la API; devuelve el JSON o lanza un Error con el `detail`.
-async function postForm(url, body) {
-  const response = await fetch(url, { method: "POST", body });
-  const data = await response.json().catch(() => ({}));
+// Pedido a la API; devuelve el JSON (o null si no hay cuerpo) o lanza un Error con el `detail`.
+async function api(url, options = {}) {
+  const response = await fetch(url, options);
+  const data = response.status === 204 ? null : await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    const detail = typeof data?.detail === "string" ? data.detail : JSON.stringify(data?.detail);
     throw new Error(detail || `HTTP ${response.status}`);
   }
   return data;
+}
+
+function postForm(url, body) {
+  return api(url, { method: "POST", body });
+}
+
+function patchJSON(url, changes) {
+  return api(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changes) });
 }
 
 // --------------------------------------------------------------------------- certificados
@@ -96,6 +106,7 @@ const ICONS = {
   download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   inspect: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/>',
 };

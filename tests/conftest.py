@@ -8,10 +8,11 @@ import os
 import shutil
 import tempfile
 
-# Antes de importar la app: pki.PKI_DIR se lee al importar el módulo, y los tests
-# no deben tocar la PKI de ./pki.
+# Antes de importar la app: pki.PKI_DIR y store.DB_PATH se leen al importar los módulos,
+# y los tests no deben tocar la PKI de ./pki ni la fuente de certificados de ./certs.db.
 _PKI_DIR = tempfile.mkdtemp(prefix="pades-test-pki-")
 os.environ["PKI_DIR"] = _PKI_DIR
+os.environ["CERT_STORE_DB"] = os.path.join(_PKI_DIR, "certs.db")
 
 from io import BytesIO  # noqa: E402
 

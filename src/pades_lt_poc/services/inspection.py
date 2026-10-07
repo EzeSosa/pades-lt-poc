@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from asn1crypto import core as asn1_core
 from cryptography import x509
@@ -14,14 +15,27 @@ from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, r
 from . import UnprocessableCertificate
 from .certificates import _issued_by, _parse_certs
 
+if TYPE_CHECKING:  # store importa de este módulo
+    from .store import CertificateStore
+
 
 class CertificateInspector:
-    """Acepta DER, PEM o PKCS#7 (como los que publica AIA), o el base64 de un DER sin encabezados."""
+    """Acepta DER, PEM o PKCS#7 (como los que publica AIA), o el base64 de un DER sin encabezados.
+
+    Con la fuente de certificados, cada certificado indica además si ya está en ella (`in_store`).
+    """
+
+    def __init__(self, store: CertificateStore | None = None) -> None:
+        self.store = store
 
     def inspect(self, data: bytes) -> dict:
         certs = _load(data)
         now = datetime.now(UTC)
-        return {"certificates": [_inspect(c, now) for c in certs]}
+        in_store = self.store.snapshot().sha256 if self.store else frozenset()
+        out = [_inspect(c, now) for c in certs]
+        for cert in out:
+            cert["in_store"] = cert["fingerprints"]["sha256"] in in_store
+        return {"certificates": out}
 
 
 def _load(data: bytes) -> list[x509.Certificate]:

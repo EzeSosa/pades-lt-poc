@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import requests
 from asn1crypto import cms
@@ -27,6 +28,9 @@ from pyhanko.sign.validation.pdf_embedded import EmbeddedPdfSignature
 
 from . import read_signed_pdf
 
+if TYPE_CHECKING:  # store importa de este módulo
+    from .store import CertificateStore
+
 AIA_TIMEOUT = 5  # segundos por descarga
 
 
@@ -35,47 +39,65 @@ class CertificateExtractor:
 
     No exige confianza: la cadena se arma con los certificados que trae el propio
     PDF (CMS de la firma + DSS), verificando que cada uno haya firmado al anterior.
-    Si falta algún emisor y `fetch_missing` es true, se descarga desde la URL AIA
-    caIssuers del certificado (cada cert indica su origen en `source`).
+    Si falta algún emisor, se busca en la fuente de certificados y, si tampoco está y
+    `fetch_missing` es true, se descarga desde la URL AIA caIssuers del certificado
+    (cada cert indica su origen en `source`, y si está en la fuente en `in_store`).
 
     Es bloqueante (descargas AIA): llamarlo fuera del event loop.
     """
+
+    def __init__(self, store: CertificateStore | None = None) -> None:
+        self.store = store
 
     def extract(self, pdf: bytes, fetch_missing: bool) -> dict:
         reader = read_signed_pdf(pdf)
         dss_certs: list[asn1_x509.Certificate] = (
             list(DocumentSecurityStore.read_dss(reader).load_certs()) if "/DSS" in reader.root else []
         )
-        dss_extra = [(c, "dss") for c in dss_certs]
+        snapshot = self.store.snapshot() if self.store else None
+        # Lo que no trae el PDF se busca en la fuente (habilitados) antes que por AIA.
+        store_extra = [
+            (asn1_x509.Certificate.load(c.public_bytes(serialization.Encoding.DER)), "store")
+            for c in (snapshot.chain_certs if snapshot else ())
+        ]
         fetcher = AiaFetcher() if fetch_missing else None
 
         results = []
         for sig in reader.embedded_signatures:
             is_doc_ts = sig.sig_object_type == "/DocTimeStamp"
+            extra = [*((c, "dss") for c in dss_certs), *store_extra]
             entry = {
                 "field": sig.field_name,
                 "type": "DocTimeStamp" if is_doc_ts else "Signature",
-                **_extract_chain(sig.signed_data, sig.compute_digest, dss_extra, "el documento fue alterado", fetcher),
+                **_extract_chain(sig.signed_data, sig.compute_digest, extra, "el documento fue alterado", fetcher),
             }
             if not is_doc_ts:
                 entry["signature_timestamp"] = (
-                    self._signature_timestamp(sig, dss_certs, fetcher) if entry["crypto_valid"] else None
+                    self._signature_timestamp(sig, dss_certs, store_extra, fetcher) if entry["crypto_valid"] else None
                 )
             results.append(entry)
 
+        in_store = snapshot.sha256 if snapshot else frozenset()
+        for entry in results:
+            for chain in (entry, entry.get("signature_timestamp") or {}):
+                for cert in chain.get("certificates") or []:
+                    cert["in_store"] = cert["sha256_fingerprint"] in in_store
         return {"signatures": results}
 
     @staticmethod
     def _signature_timestamp(
-        sig: EmbeddedPdfSignature, dss_certs: list[asn1_x509.Certificate], fetcher: AiaFetcher | None
+        sig: EmbeddedPdfSignature,
+        dss_certs: list[asn1_x509.Certificate],
+        store_extra: list[tuple[asn1_x509.Certificate, str]],
+        fetcher: AiaFetcher | None,
     ) -> dict | None:
         """Cadena de la TSA del sello de tiempo de la firma (atributo no firmado), o None si no tiene."""
         token = next(extract_tst_data_iter(sig.signer_info, signed=False), None)
         if token is None:
             return None
         # La TSA sella el valor de la firma. Sus certificados vienen en el token, y los
-        # del CMS de la firma y del DSS sirven para completar la cadena.
-        extra = [*((c, "cms") for c in sig.other_embedded_certs), *((c, "dss") for c in dss_certs)]
+        # del CMS de la firma, del DSS y de la fuente sirven para completar la cadena.
+        extra = [*((c, "cms") for c in sig.other_embedded_certs), *((c, "dss") for c in dss_certs), *store_extra]
         out = _extract_chain(
             token, message_imprint_checker(sig.signer_info), extra, "el sello no corresponde a esta firma", fetcher
         )

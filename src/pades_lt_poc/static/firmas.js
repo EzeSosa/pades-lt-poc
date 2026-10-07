@@ -26,7 +26,6 @@ function persistView(changes) {
 
 const out = (tab) => $(`#${tab}-out`);
 const setCount = (tab, text) => { $(`#count-${tab}`).textContent = text; };
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 function message(tab, text, className = "empty") {
   out(tab).replaceChildren(el(className === "empty" ? "p" : "div", className, text));
@@ -140,7 +139,7 @@ function inspectFromPdf(der, { switchTab = true } = {}) {
     () => postForm("/certificates/inspect", body),
     (data) => out("inspeccion").replaceChildren(renderInspection(data.certificates, (text) => {
       $("#inspeccion-status").textContent = text;
-    })),
+    }, { origin: "pdf" })),
     "No se pudo leer el certificado",
   );
 }

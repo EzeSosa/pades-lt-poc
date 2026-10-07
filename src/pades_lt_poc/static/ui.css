@@ -172,7 +172,31 @@ form.cert-input { flex-direction: column; align-items: stretch; gap: 16px; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
 .form-actions .status { margin-right: auto; }
 
+/* Campos de texto sueltos (notas, búsqueda). */
+input[type=text], input[type=search] { font: inherit; min-height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); width: 100%; }
+
+/* Marca de la fuente en las cadenas de /ui/firmas. */
+.source.from-store { color: var(--accent); border-color: var(--accent-fill); }
+.chip.in-store { background: var(--ok-bg); color: var(--ok-fg); text-decoration: none; }
+a.chip.in-store { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; font-size: 13px; }
+a.chip.in-store:hover { text-decoration: underline; }
+.store-add { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.add-hint p { margin: 0; flex: 1 1 420px; font-size: 14px; color: var(--muted); }
+
+/* /ui/fuente: filtros y lista. El filtro por tipo usa las mismas medidas que .nav. */
+.segmented { display: inline-flex; gap: 6px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.segmented button { min-height: 36px; padding: 0 16px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 14px; }
+.segmented button:hover { color: var(--ink); background: var(--line-soft); }
+.segmented button[aria-pressed=true] { background: var(--accent-fill); color: var(--on-accent); }
+.store-list > li.disabled .cert-info { opacity: .6; }
+.row-notes { margin: 4px 0 0; padding-left: 106px; font-size: 13px; color: var(--ink); }
+.row-detail { flex-basis: 100%; display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+form.notes-form { padding: 0; border: 0; background: transparent; align-items: flex-end; }
+.secondary.danger { color: var(--bad-fg); }
+.secondary.danger:hover { background: var(--bad-bg); }
+
 @media (max-width: 640px) {
+  .row-notes { padding-left: 0; }
   [role=tab] { padding: 0 10px; }
   .tab-count { display: none; }
   .actions { flex: 1 1 100%; }

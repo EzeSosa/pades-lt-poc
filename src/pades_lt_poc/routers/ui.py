@@ -29,3 +29,9 @@ def firmas() -> HTMLResponse:
 def certificado() -> HTMLResponse:
     """Inspector de un certificado suelto (.crt, .pem, .p7c o base64), con el reporte de la tab Inspección."""
     return _page("certificado.html")
+
+
+@router.get("/fuente", response_class=HTMLResponse)
+def fuente() -> HTMLResponse:
+    """ABM de la fuente de certificados (/store/certificates)."""
+    return _page("fuente.html")

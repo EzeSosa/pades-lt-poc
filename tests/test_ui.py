@@ -1,4 +1,4 @@
-"""Tests de la UI (/ui/firmas y /ui/certificado)."""
+"""Tests de la UI (/ui/firmas, /ui/certificado y /ui/fuente)."""
 
 import re
 
@@ -6,6 +6,7 @@ import pytest
 
 FIRMAS_SCRIPTS = ["ui.js", "certificates.js", "verify.js", "inspect.js", "firmas.js"]
 CERTIFICADO_SCRIPTS = ["ui.js", "inspect.js", "certificado.js"]
+FUENTE_SCRIPTS = ["ui.js", "inspect.js", "fuente.js"]
 
 
 def scripts(html: str) -> list[str]:
@@ -13,7 +14,8 @@ def scripts(html: str) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "page, expected", [("firmas", FIRMAS_SCRIPTS), ("certificado", CERTIFICADO_SCRIPTS)]
+    "page, expected",
+    [("firmas", FIRMAS_SCRIPTS), ("certificado", CERTIFICADO_SCRIPTS), ("fuente", FUENTE_SCRIPTS)],
 )
 def test_pages_load_their_assets(client, page, expected):
     r = client.get(f"/ui/{page}")
@@ -23,11 +25,11 @@ def test_pages_load_their_assets(client, page, expected):
     assert scripts(r.text) == expected  # ui.js primero: los demás lo usan
 
 
-@pytest.mark.parametrize("page", ["firmas", "certificado"])
-def test_nav_links_both_pages_in_the_same_tab(client, page):
+@pytest.mark.parametrize("page", ["firmas", "certificado", "fuente"])
+def test_nav_links_the_pages_in_the_same_tab(client, page):
     html = client.get(f"/ui/{page}").text
     nav = re.search(r'<nav class="nav".*?</nav>', html, re.S).group()
-    assert re.findall(r'href="(/ui/\w+)"', nav) == ["/ui/firmas", "/ui/certificado"]
+    assert re.findall(r'href="(/ui/\w+)"', nav) == ["/ui/firmas", "/ui/certificado", "/ui/fuente"]
     assert "target=" not in nav
     assert f'href="/ui/{page}" aria-current="page"' in nav
 
@@ -47,7 +49,7 @@ def test_certificado_page_reuses_the_inspection_report(client):
     assert 'postForm("/certificates/inspect"' in js
 
 
-@pytest.mark.parametrize("asset", ["ui.css", *dict.fromkeys(FIRMAS_SCRIPTS + CERTIFICADO_SCRIPTS)])
+@pytest.mark.parametrize("asset", ["ui.css", *dict.fromkeys(FIRMAS_SCRIPTS + CERTIFICADO_SCRIPTS + FUENTE_SCRIPTS)])
 def test_assets_are_served(client, asset):
     r = client.get(f"/ui/static/{asset}")
     assert r.status_code == 200
@@ -82,3 +84,26 @@ def test_redirects_to_firmas(client, path):
 @pytest.mark.parametrize("old", ["/ui/certificates", "/ui/verify", "/ui/certificate"])
 def test_old_urls_are_gone(client, old):
     assert client.get(old).status_code == 404
+
+
+def test_fuente_page_manages_the_store(client):
+    js = client.get("/ui/static/fuente.js").text
+    assert 'api("/store/certificates")' in js  # listar
+    assert "patchJSON(`/store/certificates/${cert.id}`" in js  # habilitar, confiar, notas
+    assert 'method: "DELETE"' in js  # baja
+    assert 'postForm("/store/certificates/seed"' in js
+    # Las altas no están acá: se hacen desde el reporte de inspección.
+    assert 'postForm("/store/certificates",' not in js
+    html = client.get("/ui/fuente").text
+    assert 'type="file"' not in html
+    assert 'href="/ui/certificado"' in html
+
+
+def test_inspection_report_adds_to_the_store(client):
+    """Alta en un solo lugar: el reporte de inspección, que usan /ui/certificado, la tab
+    Inspección de /ui/firmas y el detalle de /ui/fuente."""
+    inspect_js = client.get("/ui/static/inspect.js").text
+    assert 'postForm("/store/certificates", body)' in inspect_js
+    assert "cert.in_store" in inspect_js
+    assert "store:added" in client.get("/ui/static/certificates.js").text  # la cadena se entera
+    assert 'origin: "pdf"' in client.get("/ui/static/firmas.js").text

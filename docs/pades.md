@@ -47,7 +47,7 @@ Esta PoC levanta **todas las piezas de infraestructura** en una sola app FastAPI
 
 Al firmar, la app **se consulta a sí misma** por HTTP como si la TSA, el OCSP y las CRLs fueran servicios externos. Por eso `PUBLIC_BASE_URL` tiene que ser alcanzable desde el propio proceso.
 
-Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se sube el PDF una vez y tres tabs muestran lo que devuelven `POST /certificates`, `POST /verify` y `POST /certificates/inspect`. Un certificado suelto se inspecciona aparte, en `/ui/certificado`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
+Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se sube el PDF una vez y tres tabs muestran lo que devuelven `POST /certificates`, `POST /verify` y `POST /certificates/inspect`. Un certificado suelto se inspecciona aparte, en `/ui/certificado`, y la fuente de certificados se administra en `/ui/fuente`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
 
 ---
 
@@ -122,7 +122,7 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 **Validar un camino** (RFC 5280 §6) significa comprobar, para cada eslabón: la firma del emisor, las fechas de validez, las extensiones (que una CA sea realmente CA, que la clave tenga el uso correcto) y el estado de revocación.
 
-> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`SignatureVerifier.trust_roots`) se suman las raíces de `src/pades_lt_poc/trust/`, hoy las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)). Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
+> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`SignatureVerifier.trust_roots()`) se suman las raíces confiables de la **fuente de certificados** (`CertificateStore`, una tabla SQLite que se administra por `/store/certificates`); su carga inicial trae las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)), de `src/pades_lt_poc/seed/`. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
 ### Rotación de la raíz
 
@@ -147,7 +147,7 @@ Que la raíz sea el ancla de confianza no la hace eterna. Su confianza no se der
 
 Es una razón más por la que una firma B-B, sin sello ni DSS, es frágil a largo plazo: cuando venza la raíz sólo se podrá validar si el validador acepta evaluarla en una fecha pasada que nadie certificó.
 
-**El caso argentino**: hoy conviven dos raíces, y `/verify` confía en ambas (`src/pades_lt_poc/trust/`):
+**El caso argentino**: hoy conviven dos raíces, y `/verify` confía en ambas (vienen en la carga inicial de la fuente de certificados):
 
 | | *AC Raíz* (2007) | *AC Raíz de la República Argentina* (2016) |
 |---|---|---|
@@ -504,15 +504,71 @@ Detalles:
 
 ```python
 ValidationContext(
-    trust_roots=[root, ac_raiz_2007, ac_raiz_2016],  # SignatureVerifier.trust_roots
+    trust_roots=[root_poc, *raices_confiables_de_la_fuente],  # SignatureVerifier.trust_roots()
+    other_certs=[*intermedios_de_la_fuente],                  # además de los del DSS
     allow_fetching=False,
     revocation_mode="hard-fail",
-    algorithm_usage_policy=LegacyRootsPolicy([ac_raiz_2007]),  # SHA-1 sólo para la raíz de 2007
+    algorithm_usage_policy=LegacyRootsPolicy([...]),  # SHA-1 sólo para las raíces que nacieron con SHA-1
     moment=...,  # ahora, o la hora declarada con validation_time=claimed_signing_time
 )
 ```
 
-cargado con el contenido del DSS del PDF. Sin descargas y con revocación obligatoria, **sólo pasa si toda la evidencia está dentro del PDF**. Esa es la prueba práctica de que la firma es LT.
+cargado con el contenido del DSS del PDF. Sin descargas y con revocación obligatoria, **sólo pasa si toda la evidencia de revocación está dentro del PDF**. La fuente se lee en cada verificación, así que los cambios del ABM aplican enseguida.
+
+### La fuente de certificados
+
+Un validador real no confía en lo que el PDF dice de sí mismo: necesita sus propias **anclas de confianza**, y le conviene tener a mano los **intermedios** de las PKIs que valida, porque muchos firmadores no los embeben. Eso es la fuente (`CertificateStore`, en `services/store.py`):
+
+- Una tabla SQLite (`certificates`) con raíces e intermedios: el DER, su SHA-256 (único), el tipo, si está habilitado, si es confiable (sólo raíces), de dónde salió (`seed`, `manual` o `pdf`), notas y fechas. Sólo admite CAs.
+- Al arrancar se abre (y la primera vez se crea con la carga inicial) y se carga en memoria. Cada alta, baja o modificación la vuelve a cargar.
+- La raíz de la PoC no está en la tabla: es ancla implícita, porque se regenera junto con la PKI.
+
+**Por qué completar con la fuente no alcanza para B-LT.** Que un PDF sea LT significa que **él solo** permite validarlo años después. Si la cadena del firmante necesitó un intermedio que el PDF no trae, la validación es correcta para este validador, pero otro que no tenga ese intermedio no podría reproducirla. Por eso `/verify` lo distingue:
+
+1. Arma la lista de certificados **embebidos** en el PDF: los del DSS, los del CMS de cada firma y los de sus sellos de tiempo.
+2. Después de validar, recorre el camino que encontró pyHanko (`validation_path`) del firmante y de su TSA. Cada intermedio del camino que no está entre los embebidos salió de la fuente, y se informa en `completed_from_store`.
+3. Si alguna firma usó la fuente, `certificate_store.self_contained` da `false`, con una nota, y el nivel no pasa de B-T.
+
+#### La base SQLite
+
+Es un solo archivo, `certs.db`, en `$CERT_STORE_DB` (por defecto junto a la carpeta de la PKI: `./certs.db` en local, `/data/certs.db` en Docker). Lo crea la app al arrancar si no existe, con el esquema de `services/store.py`. Tiene dos tablas.
+
+**`certificates`**: una fila por raíz o intermedio.
+
+| Columna | Tipo | Qué guarda |
+|---------|------|------------|
+| `id` | `INTEGER` | Clave primaria autoincremental. Es el `{id}` de `/store/certificates/{id}`. |
+| `sha256` | `TEXT`, `UNIQUE` | Huella SHA-256 del DER, en hex. Identifica al certificado: no puede haber dos iguales. |
+| `der` | `BLOB` | El certificado en DER: es lo único que usa el validador. El resto son datos para listar y filtrar sin parsearlo. |
+| `kind` | `TEXT` | `root` (autofirmado, con su firma verificada) o `intermediate`. Se calcula al agregarlo. |
+| `trusted` | `INTEGER` (0/1) | Si es ancla de confianza. Sólo puede valer 1 en una raíz. |
+| `enabled` | `INTEGER` (0/1) | Si el validador lo usa. Uno deshabilitado sigue en la tabla (y cuenta para `in_store`), pero no aporta raíces ni intermedios. |
+| `origin` | `TEXT` | De dónde salió: `seed` (carga inicial), `manual` (certificado suelto) o `pdf` (desde un PDF firmado). |
+| `notes` | `TEXT` | Texto libre. Por defecto, vacío. |
+| `subject`, `issuer` | `TEXT` | Sujeto y emisor en RFC 4514 (`CN=…,O=…,C=AR`). |
+| `not_before`, `not_after` | `TEXT` | Vigencia, en ISO 8601 con zona horaria. |
+| `created_at`, `updated_at` | `TEXT` | Alta y última modificación, en ISO 8601 UTC. |
+
+Las restricciones viven en la base, además de en el código:
+
+- `CHECK (kind IN ('root', 'intermediate'))` y `CHECK (origin IN ('seed', 'manual', 'pdf'))`.
+- `CHECK (kind = 'root' OR trusted = 0)`: un intermedio nunca es ancla de confianza.
+- `UNIQUE (sha256)`: un mismo certificado no se carga dos veces (la API responde `409`).
+- Que sea una CA (BasicConstraints `CA=true`) lo controla el código al agregar, porque SQLite no parsea certificados.
+
+**`meta`** (`key`, `value`): datos de la base. Hoy sólo `seeded_at`, la fecha en que se aplicó la carga inicial. Mientras esa fila exista, la carga inicial no se vuelve a aplicar, aunque se borren sus certificados. Si borrás la fila, se aplica al próximo arranque (sólo agrega lo que falte).
+
+Para mirarla a mano (con la app parada o no: SQLite admite lectores concurrentes):
+
+```bash
+sqlite3 certs.db ".schema"
+sqlite3 -header -column certs.db \
+  "SELECT id, kind, trusted, enabled, origin, substr(subject, 1, 50) AS subject, not_after FROM certificates"
+# Exportar un certificado a .crt (DER):
+sqlite3 certs.db "SELECT writefile('onti.crt', der) FROM certificates WHERE subject LIKE '%Firma Digital%'"
+```
+
+Conviene modificarla por la API o la UI y no a mano: la app tiene la fuente cargada en memoria y sólo la recarga después de un cambio propio. Un cambio hecho con `sqlite3` se ve recién en el próximo arranque.
 
 ### Hora de validación (`validation_time`)
 
@@ -541,6 +597,7 @@ Con PDFs reales firmados con iText aparecen tres casos:
   "diff_policy": { "mode": "default", "note": null },
   "pades_level": "PAdES B-LTA",
   "dss": { "Certs": 5, "OCSPs": 2, "CRLs": 1 },
+  "certificate_store": { "trusted_roots": 3, "intermediates": 1, "self_contained": true, "note": null },
   "signatures": [
     {
       "field": "Firma1",
@@ -552,9 +609,10 @@ Con PDFs reales firmados con iText aparecen tres casos:
       "valid": true,
       "trusted": true,
       "coverage": "ENTIRE_REVISION",
+      "completed_from_store": [],
       "modifications": { "level": "LTA_UPDATES", "docmdp_ok": true, "suspicious": null },
       "validated_at": { "time": "...", "source": "now" },
-      "signature_timestamp": { "time": "...", "tsa": "...", "valid": true, "trusted": true },
+      "signature_timestamp": { "time": "...", "tsa": "...", "valid": true, "trusted": true, "completed_from_store": [] },
       "details": "..."
     },
     { "field": "Timestamp-…", "type": "DocTimeStamp" }
@@ -567,6 +625,8 @@ Con PDFs reales firmados con iText aparecen tres casos:
 | `intact` | El hash de los bytes del `/ByteRange` coincide con el `message-digest` del CMS: el documento no se alteró. |
 | `valid` | La firma criptográfica del CMS verifica con la clave pública del certificado. |
 | `trusted` | Se pudo construir y validar la cadena hasta la raíz confiable, **incluida la revocación** con la evidencia del DSS. |
+| `completed_from_store` | Intermedios del camino que el PDF no trae y salieron de la fuente (`subject` y `sha256`). Vacío si el PDF alcanzó solo. |
+| `certificate_store` | Cuántas raíces confiables (incluida la de la PoC) e intermedios aportó la fuente, si el PDF fue autosuficiente (`self_contained`) y, si no, una `note`. |
 | `bottom_line` | Veredicto global de pyHanko: la firma es aceptable. |
 | `coverage` | Ver [Cobertura](#cobertura-coverage). |
 | `modifications` | Análisis de lo agregado después de la firma: nivel (`LTA_UPDATES`, `FORM_FILLING`, … u `OTHER` si es sospechoso), si respeta el DocMDP, y el motivo si es sospechoso. |
@@ -578,7 +638,8 @@ Con PDFs reales firmados con iText aparecen tres casos:
 
 La página traduce la respuesta a un reporte, sin recalcular nada:
 
-- **Resumen**: `pades_level`, cuántas firmas dan `bottom_line`, los contadores de `dss` (o un aviso si no hay DSS: sin revocación ninguna firma es confiable) y los modos de `validation_time` y `diff_policy`. Si la respuesta trae `validation_time.warning` o `diff_policy.note`, los muestra como advertencias.
+- **Resumen**: `pades_level`, cuántas firmas dan `bottom_line`, los contadores de `dss` (o un aviso si no hay DSS: sin revocación ninguna firma es confiable), lo que aportó la fuente y los modos de `validation_time` y `diff_policy`. Si la respuesta trae `validation_time.warning`, `diff_policy.note` o `certificate_store.note`, los muestra como advertencias.
+- Si una cadena se completó con la fuente, la fila de confianza (y la del sello de tiempo) lo marca con los intermedios que se usaron.
 - **Una card por firma** con un veredicto (`bottom_line`) y una fila por campo de la tabla de arriba. `coverage` se muestra en verde tanto para `ENTIRE_FILE` como para `ENTIRE_REVISION`, porque lo segundo es lo normal en B-LT/B-LTA y lo agregado después lo juzga `modifications`. Un `modifications.suspicious` se muestra en rojo con el mensaje de pyHanko. Del firmante y de la TSA se destaca el *Common Name*.
 - Los `/DocTimeStamp` tienen su propia card, que aclara que no se validan por separado (ver abajo).
 - `details` va en un desplegable, que se omite al imprimir.
@@ -589,7 +650,7 @@ Es una heurística de la PoC, no un validador ETSI completo:
 
 - **B-B**: hay firmas.
 - **B-T**: todas las firmas tienen signature timestamp.
-- **B-LT**: además hay DSS y todas las firmas dan `bottom_line` validando offline.
+- **B-LT**: además hay DSS, todas las firmas dan `bottom_line` validando offline y ninguna necesitó la fuente para completar su cadena (`self_contained`).
 - **B-LTA**: además hay al menos un `/DocTimeStamp`.
 
 Limitaciones: los `/DocTimeStamp` se listan pero **no se validan**, y la validación usa `async_validate_pdf_signature` de pyHanko, no el algoritmo de validación en tiempo pasado de ETSI EN 319 102-1. Para una validación formal conviene contrastar con una herramienta independiente (por ejemplo, el validador DSS de la Comisión Europea).
@@ -599,7 +660,7 @@ Limitaciones: los `/DocTimeStamp` se listan pero **no se validan**, y la validac
 Devuelve, por cada firma y cada `/DocTimeStamp`, la cadena de certificados **tal como viene en el PDF**. A diferencia de `/verify`, **no mira la confianza ni la revocación**: sólo exige que la firma sea **criptográficamente válida**. Así también sirve para inspeccionar PDFs firmados con PKIs ajenas.
 
 1. **Chequeo criptográfico** (`intact` y `valid`, ver tabla de arriba). En un `/Sig`, el `message-digest` tiene que coincidir con el hash del ByteRange. En un `/DocTimeStamp`, los atributos firmados cubren el TSTInfo, y el `messageImprint` del TSTInfo tiene que coincidir con el hash del ByteRange. Si falla, la firma se informa con `crypto_valid: false`, un `error` y `certificates: null`.
-2. **Armado de la cadena**: parte del certificado firmante y busca al emisor de cada eslabón entre los certificados del CMS y del DSS. Un candidato es el emisor sólo si su sujeto coincide con el emisor del eslabón **y** su clave pública verifica la firma de ese certificado (no alcanza con que coincida el nombre). Se detiene en un certificado autofirmado. `chain_complete` indica si se llegó a uno.
+2. **Armado de la cadena**: parte del certificado firmante y busca al emisor de cada eslabón entre los certificados del CMS, del DSS y de la fuente de certificados (habilitados). Un candidato es el emisor sólo si su sujeto coincide con el emisor del eslabón **y** su clave pública verifica la firma de ese certificado (no alcanza con que coincida el nombre). Se detiene en un certificado autofirmado. `chain_complete` indica si se llegó a uno.
    - **Completar por AIA**: muchos firmadores (por ejemplo Ciudadano Digital de Córdoba) embeben **sólo** el certificado del firmante, sin intermedia, raíz ni DSS. Si falta un emisor y `fetch_missing` es `true` (el valor por defecto), se descarga desde la URL **AIA caIssuers** del eslabón (`http://…/ca.crt`, en DER, PEM o PKCS#7) y se repite con el certificado descargado hasta llegar a la raíz. Las descargas tienen timeout y caché por request. Si alguna falla, el detalle queda en `aia_errors` y la cadena se corta ahí.
    - **SHA-1**: `cryptography` se niega a verificar firmas SHA-1, pero PKIs reales las siguen usando (la AC Raíz de Argentina firma con SHA-1 a la CA de la ONTI). Como acá sólo se arma la cadena y no se evalúa política, en ese caso la firma RSA/ECDSA se verifica a mano.
 3. **Clasificación** de cada certificado:
@@ -607,7 +668,7 @@ Devuelve, por cada firma y cada `/DocTimeStamp`, la cadena de certificados **tal
    - `root`: autofirmado, es decir emisor = sujeto y firmado con su propia clave.
    - `intermediate`: cualquier otro eslabón.
    - `self_signed` se informa aparte, para cubrir el caso de un firmante con certificado autofirmado (`end_entity` y `self_signed: true`).
-4. **`source`**: de dónde salió cada certificado: `cms` (embebido en la firma o en el token), `dss` o `aia` (descargado). Si un certificado está en varios lugares, gana el primero de esa lista.
+4. **`source`**: de dónde salió cada certificado: `cms` (embebido en la firma o en el token), `dss`, `store` (la fuente) o `aia` (descargado). Si un certificado está en varios lugares, gana el primero de esa lista: AIA se usa sólo si no estaba en ningún otro lado. Aparte, **`in_store`** dice si el certificado está en la fuente (habilitado o no), venga de donde venga. La UI lo muestra en la cadena.
 5. **`der_b64`**: el certificado en DER codificado en base64 (sólo la parte pública). Decodificado se guarda como `.crt`/`.cer`. Con encabezados `-----BEGIN CERTIFICATE-----` es un PEM.
 
 6. **Signature timestamp**: cada firma (`/Sig`) válida trae además `signature_timestamp`, con la hora certificada (`time`) y la cadena de la TSA que la selló. El token se chequea igual que un DocTimeStamp, con una diferencia: su `messageImprint` tiene que coincidir con el hash del **valor de la firma** (lo que sella la TSA en B-T), no con el ByteRange. Si no coincide, el error es `"el sello no corresponde a esta firma"`. La cadena se arma con los certificados del token, completados con los del CMS de la firma y los del DSS. Vale `null` si la firma no tiene sello (B-B) o si la firma misma no es válida.
@@ -645,6 +706,7 @@ Recibe un certificado y lo describe campo por campo. Sirve para mirar los certif
 - **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa `_parse_certs`, el mismo parser de las descargas AIA. Si no es nada de eso, `422`.
 - **Sujeto y emisor**: atributo por atributo, en el orden del DER, con su OID. En la PKI argentina el CUIL/CUIT del titular va en `serialNumber` (`"CUIT 30680604572"`), y la tab Inspección de la UI lo destaca.
 - **`validity`**: `not_before`, `not_after`, `status` (`valid`, `expired`, `not_yet_valid`) y `days_left` respecto de la hora actual.
+- **`in_store`**: si el certificado ya está en la fuente de certificados. El reporte de inspección de la UI lo usa para ofrecer **Agregar a la fuente** a las CAs que no están: es el único lugar de la UI donde se dan altas, para que siempre se vea qué es el certificado antes de agregarlo.
 - **`is_ca`** (de BasicConstraints) y **`self_signed`** (con la misma verificación de firma que el armado de cadenas, así que acepta SHA-1).
 - **`extensions`**: cada una con `oid`, `name`, `critical` y `values`, una lista de líneas de texto. Se interpretan KU, EKU, BasicConstraints, AIA, CDP, políticas (cada CPS y aviso en su propia línea), SAN, SKI/AKI y OCSP no-check. Las que `cryptography` no conoce se decodifican si son un ASN.1 simple (texto, entero u octet string) y si no van en hex. Las de Microsoft AD CS que traen las CAs de la PKI argentina (`msCertificateTemplateName`, `msCAVersion`, `msPreviousCACertHash`) se nombran.
 

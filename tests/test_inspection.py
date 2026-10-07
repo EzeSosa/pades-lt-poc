@@ -2,7 +2,6 @@
 
 import base64
 import datetime as dt
-from pathlib import Path
 
 import pytest
 from cryptography import x509
@@ -12,8 +11,8 @@ from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
 from pades_lt_poc import pki
+from pades_lt_poc.services.store import SEED_DIR
 
-DATA = Path(__file__).parent / "data"
 Enc = serialization.Encoding
 
 
@@ -84,7 +83,7 @@ def test_pasted_base64_and_pem(client):
 
 def test_real_certificate_with_sha1_and_policies(client):
     """La CA de la ONTI (PKI argentina): firmada con SHA-1 por la AC Raíz de 2007."""
-    [out] = inspect(client, crt=(DATA / "ac-onti-firma-digital.der").read_bytes())
+    [out] = inspect(client, crt=(SEED_DIR / "ac-onti-firma-digital.der").read_bytes())
     assert out["signature_algorithm"] == "sha1WithRSAEncryption"
     assert out["is_ca"] is True
     assert out["self_signed"] is False

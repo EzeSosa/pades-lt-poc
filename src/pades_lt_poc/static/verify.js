@@ -45,12 +45,25 @@ function overview(body, sigs) {
       body.dss ? "Material de validación embebido" : "Sin DSS no hay revocación: ninguna firma es confiable",
     ),
     overviewCell(
+      "Fuente de certificados",
+      `${plural(body.certificate_store.trusted_roots, "raíz", "raíces")} · ${plural(body.certificate_store.intermediates, "intermedio", "intermedios")}`,
+      body.certificate_store.self_contained ? "El PDF alcanzó solo: no hizo falta" : "Se usó para completar cadenas",
+    ),
+    overviewCell(
       "Validado",
       body.validation_time.mode === "now" ? "A la hora actual" : "A la hora declarada",
       body.diff_policy.mode === "default" ? "Modificaciones: política por defecto" : "Modificaciones: tolera entradas libres sin asignar",
     ),
   );
   return grid;
+}
+
+// Intermedios que no venían en el PDF y salieron de la fuente; null si no hubo.
+function fromStore(list) {
+  if (!list?.length) return null;
+  const wrap = el("span", "sub");
+  wrap.append(badge("Completada con la fuente", "warn"), ` ${list.map((c) => commonName(c.subject)).join(", ")}`);
+  return wrap;
 }
 
 function callout(tone, title, text) {
@@ -86,7 +99,7 @@ function signatureReportCard(sig) {
     ["Firmante", el("strong", null, commonName(sig.signer)), el("span", "sub", sig.signer)],
     ["Integridad", yesNo(sig.intact, "Íntegra", "Alterada"), el("span", "sub", "El contenido firmado no cambió")],
     ["Firma criptográfica", yesNo(sig.valid, "Válida", "Inválida")],
-    ["Confianza", yesNo(sig.trusted, "Confiable", "No confiable"), el("span", "sub", "Cadena hasta una raíz de confianza, con revocación embebida")],
+    ["Confianza", yesNo(sig.trusted, "Confiable", "No confiable"), el("span", "sub", "Cadena hasta una raíz de confianza, con revocación embebida"), fromStore(sig.completed_from_store)],
     ["Cobertura", badge(coverage, coverageTone), coverageNote && el("span", "sub", coverageNote)],
     [
       "Modificaciones",
@@ -102,6 +115,7 @@ function signatureReportCard(sig) {
             el("span", null, commonName(ts.tsa)),
             yesNo(ts.valid, "Válido", "Inválido"),
             yesNo(ts.trusted, "Confiable", "No confiable"),
+            fromStore(ts.completed_from_store),
           ]
         : [badge("Sin sello", "warn"), el("span", "sub", "Sin sello no llega a B-T")]),
     ],
@@ -134,6 +148,7 @@ function renderReport(fileName, body) {
 
   if (body.validation_time.warning) fragment.append(callout("warn", "Validado a la hora declarada", body.validation_time.warning));
   if (body.diff_policy.note) fragment.append(callout("warn", "Análisis de modificaciones relajado", body.diff_policy.note));
+  if (body.certificate_store.note) fragment.append(callout("warn", "Cadena completada con la fuente de certificados", body.certificate_store.note));
 
   const cards = el("div", "cards");
   cards.append(...body.signatures.map(signatureReportCard));

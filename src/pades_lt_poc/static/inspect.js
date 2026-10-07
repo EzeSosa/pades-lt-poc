@@ -80,7 +80,57 @@ function extensionFacts(extensions) {
   }));
 }
 
-function inspectionCard(cert, onStatus) {
+function inStoreLink() {
+  const link = el("a", "chip in-store", "En la fuente ↗");
+  link.href = "/ui/fuente";
+  link.title = "Ver la fuente de certificados";
+  return link;
+}
+
+// Alta en la fuente: sólo para CAs. Una raíz puede quedar, o no, como ancla de confianza.
+// `origin`: "manual" (certificado suelto) o "pdf" (salió de un PDF firmado).
+function storeActions(cert, onStatus, origin) {
+  if (!cert.is_ca) return [];
+  if (cert.in_store) return [inStoreLink()];
+
+  const wrap = el("div", "store-add");
+  const add = el("button", "secondary");
+  add.type = "button";
+  add.append(icon("plus"), "Agregar a la fuente");
+  add.setAttribute("aria-label", `Agregar ${cn(cert.subject_rfc4514)} a la fuente de certificados`);
+  wrap.append(add);
+
+  let trust = null;
+  if (cert.self_signed) {
+    const label = el("label", "check");
+    trust = el("input");
+    trust.type = "checkbox";
+    trust.checked = true;
+    label.append(trust, el("span", null, "Confiar en esta raíz"));
+    wrap.append(label);
+  }
+
+  add.addEventListener("click", async () => {
+    const body = new FormData();
+    body.append("b64", cert.der_b64);
+    body.append("origin", origin);
+    body.append("trusted", trust ? trust.checked : false);
+    add.disabled = true;
+    try {
+      await postForm("/store/certificates", body);
+      wrap.replaceWith(inStoreLink());
+      // Para que otras vistas de la página (la cadena en /ui/firmas) se enteren.
+      document.dispatchEvent(new CustomEvent("store:added", { detail: { sha256: cert.fingerprints.sha256 } }));
+      onStatus(`${cn(cert.subject_rfc4514)} se agregó a la fuente`);
+    } catch (error) {
+      add.disabled = false;
+      onStatus(`No se pudo agregar a la fuente: ${error.message}`);
+    }
+  });
+  return [wrap];
+}
+
+function inspectionCard(cert, onStatus, origin) {
   const article = el("article");
   const head = el("div", "card-head");
   head.append(
@@ -92,7 +142,10 @@ function inspectionCard(cert, onStatus) {
   );
 
   const actions = el("div", "card-actions");
-  actions.append(...certActions(cert.der_b64, cert.subject_rfc4514, cert.serial_number, onStatus));
+  actions.append(
+    ...certActions(cert.der_b64, cert.subject_rfc4514, cert.serial_number, onStatus),
+    ...storeActions(cert, onStatus, origin),
+  );
 
   const key = cert.public_key;
   const keyText = [key.type, key.size && `${key.size} bits`, key.curve].filter(Boolean).join(" · ");
@@ -120,13 +173,13 @@ function inspectionCard(cert, onStatus) {
   return article;
 }
 
-function renderInspection(certificates, onStatus) {
+function renderInspection(certificates, onStatus, { origin = "manual" } = {}) {
   const fragment = document.createDocumentFragment();
   if (certificates.length > 1) {
     const title = el("div", "summary");
     title.append(el("h2", null, `${certificates.length} certificados`));
     fragment.append(title);
   }
-  fragment.append(...certificates.map((c) => inspectionCard(c, onStatus)));
+  fragment.append(...certificates.map((c) => inspectionCard(c, onStatus, origin)));
   return fragment;
 }
