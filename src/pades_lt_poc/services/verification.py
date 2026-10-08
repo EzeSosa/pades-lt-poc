@@ -24,7 +24,7 @@ from .. import pki
 from . import UnprocessableInput, read_signed_pdf
 from . import crl_index
 from .fetching import RevocationFetcherBackend
-from .store import CertificateStore
+from .store import CertificateStore, StoreSnapshot
 from .trust_problems import diagnose
 
 ValidationTime = Literal["now", "claimed_signing_time"]
@@ -141,11 +141,19 @@ class SignatureVerifier:
     def from_pki(cls, store: CertificateStore) -> SignatureVerifier:
         return cls(store, [load_cert_from_pemder(str(pki.entity(pki.ROOT).cert_path))])
 
-    def trust_roots(self) -> list[asn1_x509.Certificate]:
-        return [*self.own_roots, *self.store.snapshot().trusted_roots]
+    def trust_roots(self, snapshot: StoreSnapshot | None = None) -> list[asn1_x509.Certificate]:
+        """La raíz de la PoC y las raíces confiables habilitadas de la fuente.
 
-    def algorithm_policy(self) -> LegacyRootsPolicy:
-        return _legacy_policy(self.trust_roots())
+        `verify` pasa el snapshot que ya tomó, para que raíces e intermedios salgan del mismo
+        estado de la fuente aunque el ABM cambie en el medio.
+        """
+        snapshot = snapshot or self.store.snapshot()
+        return [*self.own_roots, *snapshot.trusted_roots]
+
+    def algorithm_policy(self, roots: list[asn1_x509.Certificate] | None = None) -> LegacyRootsPolicy:
+        """SHA-1 sólo para lo que firman las raíces confiables que nacieron con SHA-1."""
+        roots = self.trust_roots() if roots is None else roots
+        return LegacyRootsPolicy([r for r in roots if r["signature_algorithm"].hash_algo == "sha1"])
 
     async def verify(
         self,
@@ -164,13 +172,13 @@ class SignatureVerifier:
         dss_store = DocumentSecurityStore.read_dss(reader) if has_dss else None
         now = datetime.now(UTC)
         snapshot = self.store.snapshot()
-        roots = [*self.own_roots, *snapshot.trusted_roots]
+        roots = self.trust_roots(snapshot)
         sources = _Sources(_embedded_certs(reader, dss_store), snapshot.sha256)
 
         async with AsyncExitStack() as stack:
             # Un solo juego de fetchers para todo el PDF: lo descargado para una firma sirve a las demás.
             fetchers = await stack.enter_async_context(self.fetcher_backend()) if online else None
-            context = _ContextFactory(dss_store, roots, list(snapshot.intermediates), _legacy_policy(roots), fetchers)
+            context = _ContextFactory(dss_store, roots, list(snapshot.intermediates), self.algorithm_policy(roots), fetchers)
             results = []
             for sig in reader.embedded_signatures:
                 if sig.sig_object.get("/Type") == "/DocTimeStamp":
@@ -211,11 +219,6 @@ class SignatureVerifier:
             },
             "signatures": results,
         }
-
-
-def _legacy_policy(roots: list[asn1_x509.Certificate]) -> LegacyRootsPolicy:
-    """SHA-1 sólo para lo que firman las raíces confiables que nacieron con SHA-1."""
-    return LegacyRootsPolicy([r for r in roots if r["signature_algorithm"].hash_algo == "sha1"])
 
 
 class _ContextFactory:

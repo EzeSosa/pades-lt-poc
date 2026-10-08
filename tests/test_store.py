@@ -1,6 +1,8 @@
 """Tests de la fuente de certificados (/store) y de cómo la usan /verify y /certificates."""
 
 import base64
+import sqlite3
+from contextlib import closing
 from io import BytesIO
 
 import pytest
@@ -15,6 +17,7 @@ from pyhanko.sign.validation import DocumentSecurityStore
 
 from conftest import load_signer, sign
 from pades_lt_poc import pki
+from pades_lt_poc.services import store as store_module
 from pades_lt_poc.services.store import SEED_DIR, SEEDS, CertificateStore
 
 Enc = serialization.Encoding
@@ -74,6 +77,42 @@ def test_seed_runs_once_and_deletions_stick(tmp_path):
     assert len(reopened.restore_seed()) == 1  # restaurar vuelve a agregar sólo lo que falta
     assert len(reopened.list()) == len(SEEDS)
     reopened.close()
+
+
+def test_new_store_loads_once(tmp_path, monkeypatch):
+    reloads = []
+    reload = CertificateStore._reload
+    monkeypatch.setattr(CertificateStore, "_reload", lambda self: (reloads.append(1), reload(self))[1])
+    store = CertificateStore(tmp_path / "certs.db")
+    assert len(reloads) == 1
+    assert len(store.snapshot().sha256) == len(SEEDS)
+    store.close()
+
+
+def test_failed_seed_leaves_neither_certs_nor_mark(tmp_path, monkeypatch):
+    """La carga inicial y la marca seeded_at van juntas: si algo falla, el próximo arranque la aplica entera."""
+    path = tmp_path / "certs.db"
+    # _now() se pide una vez por certificado y una más para la marca: la que falla es la de la marca.
+    calls = []
+    now = store_module._now
+
+    def dies_before_marking():
+        calls.append(1)
+        if len(calls) > len(SEEDS):
+            raise RuntimeError("el proceso murió antes de marcar la carga inicial")
+        return now()
+
+    monkeypatch.setattr(store_module, "_now", dies_before_marking)
+    with pytest.raises(RuntimeError):
+        CertificateStore(path)
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT COUNT(*) FROM certificates").fetchone() == (0,)
+        assert db.execute("SELECT COUNT(*) FROM meta").fetchone() == (0,)
+
+    monkeypatch.undo()
+    store = CertificateStore(path)
+    assert len(store.list()) == len(SEEDS)
+    store.close()
 
 
 def test_restore_seed_endpoint(client):

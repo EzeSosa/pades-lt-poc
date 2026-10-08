@@ -101,10 +101,11 @@ class CertificateStore:
         self._lock = threading.RLock()
         with self._lock, self._db:
             self._db.executescript(SCHEMA)
-            seeded = self._db.execute("SELECT 1 FROM meta WHERE key = 'seeded_at'").fetchone()
-        if not seeded:
-            self.restore_seed()
-            with self._lock, self._db:
+        # La carga inicial y su marca en la misma transacción: si el proceso muere en el medio,
+        # no queda ninguna de las dos y el próximo arranque la vuelve a aplicar entera.
+        with self._lock, self._db:
+            if not self._db.execute("SELECT 1 FROM meta WHERE key = 'seeded_at'").fetchone():
+                self._insert_missing_seeds()
                 self._db.execute("INSERT INTO meta (key, value) VALUES ('seeded_at', ?)", (_now(),))
         self._reload()
 
@@ -177,17 +178,22 @@ class CertificateStore:
 
     def restore_seed(self) -> list[dict]:
         """Vuelve a agregar los certificados de la carga inicial que falten (no toca los que están)."""
-        added = []
         with self._lock, self._db:
-            for name, notes in SEEDS.items():
-                cert = x509.load_der_x509_certificate((SEED_DIR / name).read_bytes())
-                exists = self._db.execute("SELECT 1 FROM certificates WHERE sha256 = ?", (_sha256(cert),)).fetchone()
-                if not exists:
-                    added.append(self._insert(cert, trusted=True, notes=notes, origin="seed"))
+            added = self._insert_missing_seeds()
         self._reload()
         return added
 
     # ----------------------------------------------------------------------- internos
+    def _insert_missing_seeds(self) -> list[dict]:
+        """Inserta los de la carga inicial que falten. Va dentro de la transacción de quien llama."""
+        added = []
+        for name, notes in SEEDS.items():
+            cert = x509.load_der_x509_certificate((SEED_DIR / name).read_bytes())
+            exists = self._db.execute("SELECT 1 FROM certificates WHERE sha256 = ?", (_sha256(cert),)).fetchone()
+            if not exists:
+                added.append(self._insert(cert, trusted=True, notes=notes, origin="seed"))
+        return added
+
     def _insert(self, cert: x509.Certificate, *, trusted: bool, notes: str, origin: Origin) -> dict:
         kind = "root" if _issued_by(cert, cert) else "intermediate"
         now = _now()

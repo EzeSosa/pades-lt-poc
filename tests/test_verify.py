@@ -40,6 +40,14 @@ def test_sha1_exemption_only_for_roots_born_with_sha1(client):
     assert legacy == {AC_RAIZ_2007.public_key.dump()}
 
 
+def test_verify_uses_trust_roots(client, pdf, monkeypatch):
+    """verify() arma las anclas con trust_roots(): lo que prueban los tests de anclas es lo que valida."""
+    verifier = client.app.state.verifier
+    monkeypatch.setattr(verifier, "trust_roots", lambda snapshot=None: [])
+    [sig] = verify(client, sign(pdf, load_signer())).json()["signatures"]
+    assert sig["trust_problem"]["reason"] == "no_path"
+
+
 def test_sha1_allowed_only_for_legacy_root_key():
     """La AC Raíz firma con SHA-1 a la CA de la ONTI: se acepta para su clave y para ninguna otra."""
     policy = LegacyRootsPolicy([AC_RAIZ_2007])
