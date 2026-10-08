@@ -5,7 +5,9 @@
 const KINDS = { root: "Raíz", intermediate: "Intermedia" };
 const ORIGINS = { seed: "carga inicial", manual: "manual", pdf: "desde un PDF" };
 
-const state = { certs: [], kind: "all", query: "", open: new Set() };
+// `panels`: el detalle de cada certificado abierto, armado una sola vez. Se reusa al redibujar la
+// lista para no volver a pedir la inspección ni perder las notas que se están escribiendo.
+const state = { certs: [], kind: "all", query: "", open: new Set(), panels: new Map() };
 
 const setSeedStatus = (text) => { $("#seed-status").textContent = text; };
 const setListStatus = (text) => { $("#list-status").textContent = text; };
@@ -103,6 +105,18 @@ function row(cert) {
 
 // --------------------------------------------------------------------------- detalle y notas
 function detailPanel(cert) {
+  let entry = state.panels.get(cert.id);
+  if (!entry) {
+    entry = buildDetailPanel(cert);
+    state.panels.set(cert.id, entry);
+  } else if (entry.savedNotes !== cert.notes) {
+    // Las notas cambiaron en la fuente (se guardaron): el campo pasa a mostrar lo guardado.
+    entry.input.value = entry.savedNotes = cert.notes;
+  }
+  return entry.panel;
+}
+
+function buildDetailPanel(cert) {
   const panel = el("div", "row-detail");
   const out = el("div", "results");
   out.append(el("p", "card-note", "Leyendo el certificado…"));
@@ -127,12 +141,14 @@ function detailPanel(cert) {
   postForm("/certificates/inspect", body)
     .then((data) => out.replaceChildren(renderInspection(data.certificates, setListStatus)))
     .catch((error) => out.replaceChildren(el("div", "error-box", `No se pudo leer el certificado: ${error.message}`)));
-  return panel;
+  return { panel, input, savedNotes: cert.notes };
 }
 
 function toggleDetail(id) {
-  if (state.open.has(id)) state.open.delete(id);
-  else state.open.add(id);
+  if (state.open.has(id)) {
+    state.open.delete(id);
+    state.panels.delete(id);
+  } else state.open.add(id);
   renderList();
 }
 
@@ -154,6 +170,7 @@ async function remove(cert) {
   try {
     await api(`/store/certificates/${cert.id}`, { method: "DELETE" });
     state.open.delete(cert.id);
+    state.panels.delete(cert.id);
     setListStatus(`${name} se borró de la fuente`);
     await load();
   } catch (error) {

@@ -54,6 +54,10 @@ def test_assets_are_served(client, asset):
     r = client.get(f"/ui/static/{asset}")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/css" if asset.endswith(".css") else "text/javascript")
+    # Se revalidan siempre: si no, tras actualizar la app queda el HTML nuevo con el JS viejo.
+    assert r.headers["cache-control"] == "no-cache"
+    again = client.get(f"/ui/static/{asset}", headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
 
 
 def test_firmas_calls_the_three_endpoints(client):

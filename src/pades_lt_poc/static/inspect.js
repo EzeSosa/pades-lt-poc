@@ -105,7 +105,8 @@ function storeActions(cert, onStatus, origin) {
     const label = el("label", "check");
     trust = el("input");
     trust.type = "checkbox";
-    trust.checked = true;
+    // Una raíz que viene adentro de un PDF la eligió quien lo firmó: confiar en ella tiene que ser una decisión.
+    trust.checked = origin !== "pdf";
     label.append(trust, el("span", null, "Confiar en esta raíz"));
     wrap.append(label);
   }

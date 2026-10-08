@@ -1,6 +1,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..dependencies import CertificateStoreDep
@@ -40,7 +41,7 @@ async def add_certificates(
     store: CertificateStoreDep,
     crt: UploadFile | None = File(None, description="Archivo .crt/.cer/.pem/.p7c: DER, PEM o PKCS#7."),
     b64: str | None = Form(None, description="Alternativa al archivo: el base64 de un DER, o un PEM."),
-    trusted: bool = Form(True, description="Si es una raíz, si queda como ancla de confianza. Un intermedio nunca lo es."),
+    trusted: bool = Form(False, description="Si es una raíz, si queda como ancla de confianza. Un intermedio nunca lo es."),
     notes: str = Form(""),
     origin: Literal["manual", "pdf"] = Form("manual", description="De dónde salió: cargado a mano o desde un PDF."),
 ) -> dict:
@@ -49,7 +50,8 @@ async def add_certificates(
         raise HTTPException(422, "Mandá un archivo `crt` o un `b64`, uno solo de los dos")
     data = await crt.read() if crt is not None else b64.encode()
     try:
-        return store.add(data, trusted=trusted, notes=notes, origin=origin)
+        # store.add bloquea (lock, SQLite y re-parseo de la fuente): fuera del event loop.
+        return await run_in_threadpool(store.add, data, trusted=trusted, notes=notes, origin=origin)
     except DuplicateCertificate as e:
         raise HTTPException(409, f"Ya está en la fuente (id {', '.join(map(str, e.args[0]))})") from None
 

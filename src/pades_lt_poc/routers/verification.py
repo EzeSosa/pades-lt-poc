@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, Form, UploadFile
 
 from ..dependencies import VerifierDep
-from ..services.verification import DiffPolicyName, ValidationTime
+from ..services.verification import DiffPolicyName, RevocationMode, ValidationTime
 
 router = APIRouter(tags=["Verificación"])
 
@@ -25,6 +25,14 @@ async def verify(
             "allow_unallocated_free_entries: además acepta entradas libres de objetos que nunca existieron."
         ),
     ),
+    revocation: RevocationMode = Form(
+        "offline",
+        description=(
+            "offline: sólo la revocación que trae el PDF (por defecto). online: además descarga CRL, "
+            "OCSP y emisores faltantes de las URLs de cada certificado; sólo con validation_time=now, "
+            "y el nivel alcanzado no pasa de B-T."
+        ),
+    ),
 ) -> dict:
-    """Valida offline usando sólo el DSS embebido."""
-    return await verifier.verify(await pdf.read(), validation_time, diff_policy)
+    """Valida las firmas con el material del PDF y la fuente de certificados; con conexión, si se pide."""
+    return await verifier.verify(await pdf.read(), validation_time, diff_policy, revocation)

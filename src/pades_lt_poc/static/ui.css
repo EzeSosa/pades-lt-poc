@@ -144,6 +144,19 @@ details .chain { border-top: 1px solid var(--line-soft); background: var(--surfa
 .callout { border-radius: 10px; padding: 14px 18px; font-size: 14px; }
 .callout strong { display: block; margin-bottom: 2px; }
 .suspicious { flex-basis: 100%; font: 13px var(--mono); color: var(--bad-fg); overflow-wrap: anywhere; }
+.problem { flex-basis: 100%; font-size: 14px; color: var(--bad-fg); }
+.problem + .sub { flex-basis: 100%; }
+/* Caminos probados cuando una firma no es confiable. */
+.paths { list-style: none; margin: 0; padding: 0; background: var(--surface); border-top: 1px solid var(--line-soft); }
+.paths > li { display: flex; flex-direction: column; gap: 6px; padding: 14px 22px; border-top: 1px solid var(--row-line); }
+.paths > li:first-child { border-top: 0; }
+.paths .mono { overflow-wrap: anywhere; }
+.path-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.path-chain { font-weight: 500; overflow-wrap: anywhere; }
+/* Modo de revocación (tab Verificación): qué hace y, con conexión, qué se descargó. */
+.revocation-note { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--muted); }
+.revocation-note.used { color: var(--warn-fg); background: var(--warn-bg); padding: 8px 12px; border-radius: 8px; }
+.fetched details { border-top: 0; }
 .facts { margin: 0; display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
 .facts dt, .facts dd { margin: 0; padding: 12px 22px; border-top: 1px solid var(--row-line); }
 .facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: 0; }

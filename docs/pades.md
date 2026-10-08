@@ -41,7 +41,7 @@ Esta PoC levanta **todas las piezas de infraestructura** en una sola app FastAPI
                        │                           ├──▶ POST /ocsp    (estado de firmante/TSA) │
   cliente ◀─ PDF ──    │                           └──▶ GET  /pki/*.crl (estado de la intermedia)│
    firmado             │                                                                     │
-                       │  POST /verify ──▶ pyHanko (offline, sólo con lo que trae el PDF)     │
+                       │  POST /verify ──▶ pyHanko (offline, u online bajando CRL/OCSP)      │
                        └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -514,6 +514,43 @@ ValidationContext(
 ```
 
 cargado con el contenido del DSS del PDF. Sin descargas y con revocación obligatoria, **sólo pasa si toda la evidencia de revocación está dentro del PDF**. La fuente se lee en cada verificación, así que los cambios del ABM aplican enseguida.
+
+### Con conexión (`revocation=online`)
+
+Sin conexión, una firma sin sello de tiempo se valida a la hora actual con la revocación que trae el PDF, y esa revocación vence: la CRL de la AC ONTI, por ejemplo, dura un día. Pasado ese día la firma da "no confiable" aunque nada haya cambiado. Con `revocation=online`, `/verify` además **descarga** lo que haga falta de las URLs de cada certificado: CRLs (CRL Distribution Points), respuestas OCSP y emisores faltantes (AIA):
+
+```python
+ValidationContext(..., allow_fetching=True, fetchers=RevocationFetcherBackend(), time_tolerance=timedelta(minutes=2))
+```
+
+- **Sólo a la hora actual.** pyHanko no descarga para validar en el pasado (`moment` no se combina con `allow_fetching`): `validation_time=claimed_signing_time` con `online` da 422, y la UI fija el selector de hora en "Ahora".
+- **El nivel no pasa de B-T.** Lo descargado dice si la firma es confiable *hoy*, no si el PDF alcanza solo. Para evaluar LT hay que validar sin conexión.
+- **Qué se descargó** va en `revocation.fetched`: cada CRL (emisor y vigencia), cada respuesta OCSP (serie, estado y fecha) y cada emisor bajado por AIA. Un intermedio bajado por AIA no cuenta como `completed_from_store`.
+- **Timeouts**: 10 s por OCSP o AIA y 60 s por CRL, porque la CRL de la AC ONTI pesa ~9 MB y tarda más de 10 s. Un timeout se trata como "no se pudo descargar" (`services/fetching.py`); en los fetchers de pyHanko tal cual, tira abajo toda la verificación.
+- **Caché de CRLs**: una CRL descargada se guarda en memoria, por URL, hasta su `nextUpdate` (`CrlCache`, hasta 32). Antes de esa fecha la CA no publica otra, así que bajarla de nuevo no aporta nada. En el reporte, cada CRL dice si salió del caché (`from_cache`) y cuándo se descargó (`fetched_at`). Las respuestas OCSP no se cachean: son por certificado, chicas y rápidas.
+- **Reloj**: las respuestas se emiten "ahora" según el reloj del servidor remoto. Con la tolerancia de 1 s de pyHanko, un par de segundos de desfasaje las vuelve "del futuro" (`OCSP response is too recent`), así que con conexión se toleran 2 minutos.
+
+### CRLs grandes: índice de seriales
+
+Para saber si un certificado está revocado, pyhanko-certvalidator recorre la lista de revocados de la CRL con asn1crypto, en Python, entrada por entrada (`validate_crl.find_cert_in_list`). Con la CRL de la AC ONTI (~9 MB, ~240 mil entradas) cada recorrido tarda ~2 s, y una verificación hace varios: uno por firma y por cada copia de la CRL (la del DSS y la descargada). Si el certificado no está revocado, que es lo común, el recorrido es completo. Medido con un PDF de CiDi: ~7 s de CPU sólo en eso.
+
+`services/crl_index.py` reemplaza esa función (se instala al crear el `SignatureVerifier`, y sirve con y sin conexión). Arma con `cryptography`, cuyo parser es Rust, un índice de los seriales revocados de cada CRL (~0,15 s para la de la ONTI) y lo cachea por huella de la CRL (hasta 16). Es la misma idea que el parser por *stream* de DSS: no materializar cada entrada en objetos para buscar un serial.
+
+- Serial ausente: se responde enseguida.
+- Serial presente: se delega en la función original, que arma la fecha y el motivo y controla las extensiones críticas con su semántica exacta. Es el caso raro.
+- CRL indirecta (alguna entrada con `certificateIssuer`) o que `cryptography` no lee: se delega siempre.
+
+La descarga en sí no se puede evitar con un parser por *stream*: para verificar la firma de la CRL hace falta el `tbsCertList` completo. Eso lo resuelve el caché de CRLs.
+
+Con los dos cambios, verificar con conexión un PDF de CiDi pasó de ~11,5 s a ~4,8 s la primera vez (casi todo es la descarga) y a ~0,5 s con la CRL en caché.
+
+### Por qué no es confiable (`trust_problem`)
+
+pyHanko resume una falla de confianza en una indicación AdES (`CERTIFICATE_CHAIN_GENERAL_FAILURE` y similares) y el mensaje real sólo va al log. Cuando una firma o su sello de tiempo no son confiables, `/verify` vuelve a validar cada camino candidato hasta una raíz (hasta 5) con el mismo `ValidationContext` y devuelve en `trust_problem`:
+
+- `reason`: el motivo más informativo entre los caminos: `no_path` (falta una intermedia o la raíz), `revoked`, `stale_revocation` (la CRL u OCSP disponible venció), `missing_revocation`, `algorithm`, `not_yet_valid`, `expired` u `other`.
+- `summary` y `hint`: el motivo en castellano y qué probar (agregar la intermedia a la fuente, validar con conexión, validar a la hora declarada).
+- `paths`: cada camino probado, de la hoja a la raíz (nombre, vigencia y huella de cada eslabón), con su motivo y el mensaje de pyhanko-certvalidator. Sirve para ver, por ejemplo, que una CA renovada aparece dos veces con el mismo nombre y que uno de los caminos falla por la versión vencida.
 
 ### La fuente de certificados
 

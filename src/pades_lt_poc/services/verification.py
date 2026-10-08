@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from asn1crypto import x509 as asn1_x509
@@ -13,15 +16,31 @@ from pyhanko.sign.validation import DocumentSecurityStore, async_validate_pdf_si
 from pyhanko.sign.validation.generic_cms import extract_certs_for_validation, extract_tst_data_iter
 from pyhanko.sign.validation.pdf_embedded import EmbeddedPdfSignature
 from pyhanko_certvalidator import ValidationContext
+from pyhanko_certvalidator.fetchers import FetcherBackend, Fetchers
 from pyhanko_certvalidator.path import ValidationPath
 from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowWeakAlgorithmsPolicy
 
 from .. import pki
-from . import read_signed_pdf
+from . import UnprocessableInput, read_signed_pdf
+from . import crl_index
+from .fetching import RevocationFetcherBackend
 from .store import CertificateStore
+from .trust_problems import diagnose
 
 ValidationTime = Literal["now", "claimed_signing_time"]
 DiffPolicyName = Literal["default", "allow_unallocated_free_entries"]
+RevocationMode = Literal["offline", "online"]
+
+
+ONLINE_CLOCK_SKEW = timedelta(minutes=2)
+
+ONLINE_NOTE = (
+    "Se validó con conexión: además de la revocación que trae el PDF se descargaron CRL y "
+    "OCSP actualizadas (y los emisores que faltaban, por AIA) de las URLs de cada certificado. "
+    "Una CRL ya descargada se reusa hasta su próxima actualización, porque la CA no publica otra antes. "
+    "El resultado dice si las firmas son confiables hoy, no si el PDF alcanza solo: por eso el "
+    "nivel alcanzado no pasa de B-T. Para evaluar LT, validá sin conexión."
+)
 
 UNALLOCATED_FREES_NOTE = (
     "Se aceptaron entradas libres de la xref para números de objeto que no existían en la "
@@ -90,19 +109,33 @@ DIFF_POLICIES = {"default": DEFAULT_DIFF_POLICY, "allow_unallocated_free_entries
 
 
 class SignatureVerifier:
-    """Valida OFFLINE: sin fetching y con revocación obligatoria.
+    """Valida con revocación obligatoria (hard-fail), sin conexión por defecto.
 
     Anclas de confianza: la raíz de la PoC (implícita, porque se regenera con la PKI) y
     las raíces confiables habilitadas de la fuente. Los intermedios habilitados de la
     fuente completan cadenas que el PDF no trae; cuando se usan, la firma lo informa en
     `completed_from_store` y el PDF deja de contar como LT por sí mismo.
 
+    Sin conexión (`offline`) sólo cuenta la revocación que trae el PDF. Con conexión
+    (`online`) además se descargan CRL, OCSP y emisores faltantes (AIA) de las URLs de
+    cada certificado; sólo a la hora actual, porque pyHanko no descarga para validar en
+    el pasado. Lo descargado se informa en `revocation.fetched`.
+
     La fuente se lee en cada verificación, así que un cambio en el ABM aplica enseguida.
     """
 
-    def __init__(self, store: CertificateStore, own_roots: list[asn1_x509.Certificate]) -> None:
+    def __init__(
+        self,
+        store: CertificateStore,
+        own_roots: list[asn1_x509.Certificate],
+        fetcher_backend: Callable[[], FetcherBackend] = RevocationFetcherBackend,
+    ) -> None:
         self.store = store
         self.own_roots = own_roots
+        self.fetcher_backend = fetcher_backend
+        # Buscar un serial en una CRL grande (la de la ONTI) recorriéndola en Python tarda
+        # segundos: se usa un índice armado con `cryptography` (ver crl_index).
+        crl_index.install()
 
     @classmethod
     def from_pki(cls, store: CertificateStore) -> SignatureVerifier:
@@ -114,26 +147,43 @@ class SignatureVerifier:
     def algorithm_policy(self) -> LegacyRootsPolicy:
         return _legacy_policy(self.trust_roots())
 
-    async def verify(self, pdf: bytes, validation_time: ValidationTime, diff_policy: DiffPolicyName) -> dict:
+    async def verify(
+        self,
+        pdf: bytes,
+        validation_time: ValidationTime,
+        diff_policy: DiffPolicyName,
+        revocation: RevocationMode = "offline",
+    ) -> dict:
+        online = revocation == "online"
+        if online and validation_time != "now":
+            raise UnprocessableInput(
+                "Con conexión sólo se valida a la hora actual: la revocación que se descarga es de hoy."
+            )
         reader = read_signed_pdf(pdf)
         has_dss = "/DSS" in reader.root
         dss_store = DocumentSecurityStore.read_dss(reader) if has_dss else None
         now = datetime.now(UTC)
         snapshot = self.store.snapshot()
         roots = [*self.own_roots, *snapshot.trusted_roots]
-        context = _ContextFactory(dss_store, roots, list(snapshot.intermediates), _legacy_policy(roots))
-        embedded = _embedded_certs(reader, dss_store)
+        sources = _Sources(_embedded_certs(reader, dss_store), snapshot.sha256)
 
-        results = []
-        for sig in reader.embedded_signatures:
-            if sig.sig_object.get("/Type") == "/DocTimeStamp":
-                results.append({"field": sig.field_name, "type": "DocTimeStamp"})
-                continue
-            # La hora declarada sale del atributo signingTime del CMS o, si no está, de /M.
-            claimed = sig.self_reported_timestamp if validation_time == "claimed_signing_time" else None
-            moment, source = (claimed, "claimed_signing_time") if claimed else (now, "now")
-            vc = context.at(moment, in_the_past=claimed is not None)
-            results.append(await _verify_signature(sig, vc, DIFF_POLICIES[diff_policy], moment, source, embedded))
+        async with AsyncExitStack() as stack:
+            # Un solo juego de fetchers para todo el PDF: lo descargado para una firma sirve a las demás.
+            fetchers = await stack.enter_async_context(self.fetcher_backend()) if online else None
+            context = _ContextFactory(dss_store, roots, list(snapshot.intermediates), _legacy_policy(roots), fetchers)
+            results = []
+            for sig in reader.embedded_signatures:
+                if sig.sig_object.get("/Type") == "/DocTimeStamp":
+                    results.append({"field": sig.field_name, "type": "DocTimeStamp"})
+                    continue
+                # La hora declarada sale del atributo signingTime del CMS o, si no está, de /M.
+                claimed = sig.self_reported_timestamp if validation_time == "claimed_signing_time" else None
+                moment, source = (claimed, "claimed_signing_time") if claimed else (now, "now")
+                vc = context.at(moment, in_the_past=claimed is not None)
+                results.append(
+                    await _verify_signature(sig, vc, DIFF_POLICIES[diff_policy], moment, source, sources, online)
+                )
+            fetched = _fetched_summary(fetchers) if online else None
 
         self_contained = not any(_used_store(r) for r in results)
         return {
@@ -145,7 +195,13 @@ class SignatureVerifier:
                 "mode": diff_policy,
                 "note": UNALLOCATED_FREES_NOTE if diff_policy == "allow_unallocated_free_entries" else None,
             },
-            "pades_level": _pades_level(results, has_dss, self_contained),
+            "revocation": {
+                "mode": revocation,
+                "fetched": fetched,
+                "note": ONLINE_NOTE if online else None,
+            },
+            # Con conexión no se sabe si el PDF alcanza solo: el nivel no pasa de B-T.
+            "pades_level": _pades_level(results, has_dss, self_contained and not online),
             "dss": _dss_summary(reader) if has_dss else None,
             "certificate_store": {
                 "trusted_roots": len(roots),
@@ -163,10 +219,15 @@ def _legacy_policy(roots: list[asn1_x509.Certificate]) -> LegacyRootsPolicy:
 
 
 class _ContextFactory:
-    """Arma el ValidationContext de cada firma: DSS + fuente, a la hora que corresponda."""
+    """Arma el ValidationContext de cada firma: DSS + fuente, a la hora que corresponda.
 
-    def __init__(self, dss_store, roots, intermediates, policy) -> None:
+    Con `fetchers` (modo con conexión) se descarga lo que falte; pyHanko no admite
+    descargar con una hora fija, así que valida a la hora actual.
+    """
+
+    def __init__(self, dss_store, roots, intermediates, policy, fetchers: Fetchers | None = None) -> None:
         self.dss_store, self.roots, self.intermediates, self.policy = dss_store, roots, intermediates, policy
+        self.fetchers = fetchers
 
     def at(self, moment: datetime, in_the_past: bool) -> ValidationContext:
         # Validando en el pasado, la revocación embebida es posterior a `moment` (se obtuvo
@@ -174,12 +235,16 @@ class _ContextFactory:
         kwargs = dict(
             trust_roots=self.roots,
             other_certs=self.intermediates,  # el DSS los suma a los suyos
-            allow_fetching=False,
             revocation_mode="hard-fail",
             algorithm_usage_policy=self.policy,
-            moment=moment,
             retroactive_revinfo=in_the_past,
         )
+        if self.fetchers:
+            # Lo descargado se emite "ahora" según el reloj del servidor remoto: con 1 s de
+            # tolerancia (lo de pyHanko), un par de segundos de desfasaje lo vuelven "del futuro".
+            kwargs.update(allow_fetching=True, fetchers=self.fetchers, time_tolerance=ONLINE_CLOCK_SKEW)
+        else:
+            kwargs.update(allow_fetching=False, moment=moment)
         if self.dss_store:
             return self.dss_store.as_validation_context(kwargs)
         # Sin DSS no hay revocación: listas vacías para que la firma resulte no confiable
@@ -199,19 +264,67 @@ def _embedded_certs(reader: PdfFileReader, dss_store: DocumentSecurityStore | No
     return {c.dump() for c in certs}
 
 
-def _from_store(path: ValidationPath | None, embedded: set[bytes]) -> list[dict]:
-    """Eslabones intermedios del camino que el PDF no trae: salieron de la fuente.
+@dataclass(frozen=True)
+class _Sources:
+    """De dónde puede salir cada certificado: el PDF (DER) o la fuente (SHA-256 en hex)."""
 
-    La hoja siempre está en el PDF y la raíz es, por definición, del validador.
+    embedded: set[bytes]
+    store: frozenset[str]
+
+
+def _from_store(path: ValidationPath | None, trusted: bool, sources: _Sources) -> list[dict]:
+    """Eslabones intermedios del camino que el PDF no trae y la fuente sí.
+
+    La hoja siempre está en el PDF y la raíz es, por definición, del validador. Sólo
+    cuenta si la validación salió bien: si falla, pyHanko igual devuelve el camino con
+    el que falló, y no se puede decir que la fuente completó la cadena. Con conexión,
+    un intermedio que no está en ninguno de los dos se descargó por AIA.
     """
-    if path is None:
+    if path is None or not trusted:
         return []
     intermediates = list(path.iter_certs(include_root=False))[:-1]  # sin la hoja
     return [
         {"subject": c.subject.human_friendly, "sha256": c.sha256.hex()}
         for c in intermediates
-        if c.dump() not in embedded
+        if c.dump() not in sources.embedded and c.sha256.hex() in sources.store
     ]
+
+
+def _fetched_summary(fetchers: Fetchers) -> dict:
+    """Lo que se descargó en modo con conexión: CRLs, respuestas OCSP y emisores (AIA).
+
+    Una CRL puede venir del caché (`from_cache`): se descargó en una verificación anterior
+    (`fetched_at`) y sigue vigente.
+    """
+    from_cache = getattr(fetchers.crl_fetcher, "from_cache", {})
+
+    def crl(c) -> dict:
+        tbs = c["tbs_cert_list"]
+        next_update = tbs["next_update"].native
+        cached = from_cache.get(id(c))
+        return {
+            "issuer": c.issuer.human_friendly,
+            "this_update": tbs["this_update"].native.isoformat(),
+            "next_update": next_update.isoformat() if next_update else None,
+            "from_cache": cached is not None,
+            "fetched_at": cached.fetched_at.isoformat() if cached else None,
+        }
+
+    def ocsp(r) -> dict:
+        data = r["response_bytes"]["response"].parsed["tbs_response_data"]
+        [single, *_] = data["responses"]
+        return {
+            "serial_number": format(single["cert_id"]["serial_number"].native, "x"),
+            "status": single["cert_status"].name,
+            "produced_at": data["produced_at"].native.isoformat(),
+        }
+
+    return {
+        # La misma CRL puede llegar de dos URLs (p. ej. cdp1 y cdp2): se lista una vez.
+        "crls": [crl(c) for c in {c.dump(): c for c in fetchers.crl_fetcher.fetched_crls()}.values()],
+        "ocsps": [ocsp(r) for r in fetchers.ocsp_fetcher.fetched_responses()],
+        "certs": [{"subject": c.subject.human_friendly, "sha256": c.sha256.hex()} for c in fetchers.cert_fetcher.fetched_certs()],
+    }
 
 
 def _used_store(result: dict) -> bool:
@@ -225,12 +338,36 @@ async def _verify_signature(
     diff_policy: StandardDiffPolicy,
     moment: datetime,
     source: str,
-    embedded: set[bytes],
+    sources: _Sources,
+    online: bool,
 ) -> dict:
     status = await async_validate_pdf_signature(
         sig, signer_validation_context=vc, ts_validation_context=vc, diff_policy=diff_policy
     )
     ts = status.timestamp_validity
+    validated_now = source == "now"
+    signer_problem = ts_problem = None
+    if not status.trusted:
+        signer_problem = await diagnose(
+            status.signing_cert,
+            extract_certs_for_validation(sig.signed_data).other_certs,
+            vc,
+            valid=status.valid,
+            indication=status.trust_problem_indic,
+            validated_now=validated_now,
+            online=online,
+        )
+    if ts and not ts.trusted:
+        tokens = extract_tst_data_iter(sig.signer_info, signed=False)
+        ts_problem = await diagnose(
+            ts.signing_cert,
+            [c for token in tokens for c in extract_certs_for_validation(token).other_certs],
+            vc,
+            valid=ts.valid,
+            indication=ts.trust_problem_indic,
+            validated_now=validated_now,
+            online=online,
+        )
     return {
         "field": sig.field_name,
         "type": "Signature",
@@ -240,9 +377,11 @@ async def _verify_signature(
         "intact": status.intact,
         "valid": status.valid,
         "trusted": status.trusted,
+        # Si no es confiable, por qué: resumen, sugerencia y el error de cada camino probado.
+        "trust_problem": signer_problem,
         "coverage": status.coverage.name,
         # Intermedios del camino del firmante que no vienen en el PDF sino en la fuente.
-        "completed_from_store": _from_store(status.validation_path, embedded),
+        "completed_from_store": _from_store(status.validation_path, status.trusted, sources),
         # Qué cambió después de la firma: si es sospechoso, `bottom_line` da false.
         "modifications": {
             "level": status.modification_level.name if status.modification_level else None,
@@ -258,7 +397,8 @@ async def _verify_signature(
                 "tsa": ts.signing_cert.subject.human_friendly,
                 "valid": ts.valid,
                 "trusted": ts.trusted,
-                "completed_from_store": _from_store(ts.validation_path, embedded),
+                "trust_problem": ts_problem,
+                "completed_from_store": _from_store(ts.validation_path, ts.trusted, sources),
             }
             if ts
             else None

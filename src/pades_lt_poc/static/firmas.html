@@ -64,6 +64,13 @@
 
   <section role="tabpanel" id="panel-verificacion" aria-labelledby="tab-verificacion" hidden>
     <div class="panel-bar">
+      <div class="field">
+        <span id="revocation-label">Revocación</span>
+        <div class="segmented" role="group" aria-labelledby="revocation-label">
+          <button type="button" data-revocation="offline" aria-pressed="true">Sin conexión</button>
+          <button type="button" data-revocation="online" aria-pressed="false">Con conexión</button>
+        </div>
+      </div>
       <label class="field">
         <span>Hora de validación</span>
         <select id="validation-time">
@@ -80,6 +87,7 @@
       </label>
       <span class="spacer"></span>
       <span class="eyebrow">POST /verify</span>
+      <p class="revocation-note" id="revocation-note" role="status" aria-live="polite"></p>
     </div>
     <div class="results" id="verificacion-out"></div>
   </section>

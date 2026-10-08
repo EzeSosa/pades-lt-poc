@@ -16,7 +16,7 @@ const state = {
   // Cada pedido lleva un número: si llega la respuesta de uno viejo (cambió el PDF o una opción), se descarta.
   tickets: { certificados: 0, verificacion: 0, inspeccion: 0 },
   // Lo que se guarda además del PDF ("firmas-pdf"), en "firmas-view".
-  view: { tab: "certificados", fetchMissing: true, validationTime: "now", diffPolicy: "default", inspected: null },
+  view: { tab: "certificados", fetchMissing: true, revocation: "offline", validationTime: "now", diffPolicy: "default", inspected: null },
 };
 
 function persistView(changes) {
@@ -92,19 +92,56 @@ function loadCertificates() {
 }
 
 // --------------------------------------------------------------------------- Verificación
+const online = () => state.view.revocation === "online";
+
+// Con conexión sólo se valida a la hora actual: el selector de hora queda fijo en "Ahora".
+function applyRevocationMode() {
+  for (const b of document.querySelectorAll("[data-revocation]")) b.setAttribute("aria-pressed", b.dataset.revocation === state.view.revocation);
+  const time = $("#validation-time");
+  time.disabled = online();
+  time.value = online() ? "now" : state.view.validationTime;
+  time.title = online() ? "Con conexión se valida a la hora actual: la revocación que se descarga es de hoy." : "";
+  setRevocationNote();
+}
+
+// La nota del control: qué hace el modo y, después de verificar, qué se descargó.
+function setRevocationNote(revocation) {
+  const note = $("#revocation-note");
+  note.classList.toggle("used", Boolean(revocation?.fetched));
+  if (!online()) {
+    note.textContent = "Sin conexión: sólo cuenta la revocación (CRL y OCSP) que trae el PDF.";
+  } else if (!revocation?.fetched) {
+    note.textContent = "Con conexión: descarga CRL y OCSP actualizadas de las URLs de cada certificado, a la hora actual.";
+  } else {
+    const { crls, ocsps, certs } = revocation.fetched;
+    const cached = crls.filter((c) => c.from_cache).length;
+    const parts = [
+      `${plural(crls.length, "CRL", "CRL")}${cached ? ` (${cached} del caché)` : ""}`,
+      plural(ocsps.length, "respuesta OCSP", "respuestas OCSP"),
+    ];
+    if (certs.length) parts.push(plural(certs.length, "emisor por AIA", "emisores por AIA"));
+    note.textContent = crls.length || ocsps.length || certs.length
+      ? `Se usó revocación descargada, no sólo la del PDF: ${parts.join(" · ")}.`
+      : "Con conexión, pero no se descargó nada: alcanzó con lo que trae el PDF.";
+  }
+}
+
 function loadVerify() {
   const body = new FormData();
   body.append("pdf", state.file);
-  body.append("validation_time", $("#validation-time").value);
+  body.append("revocation", state.view.revocation);
+  body.append("validation_time", online() ? "now" : $("#validation-time").value);
   body.append("diff_policy", $("#diff-policy").value);
   setCount("verificacion", "");
+  setRevocationNote();
   return run(
     "verificacion",
-    "Verificando…",
+    online() ? "Verificando y descargando revocación…" : "Verificando…",
     () => postForm("/verify", body),
     (data) => {
       out("verificacion").replaceChildren(renderReport(state.file.name, data));
       setCount("verificacion", data.pades_level.replace(/^PAdES /, ""));
+      setRevocationNote(data.revocation);
     },
     "No se pudo verificar el PDF",
   );
@@ -175,6 +212,7 @@ function clearPdf() {
     message(tab, EMPTY[tab]);
   }
   fillPicker();
+  setRevocationNote();
   $("#pdf").value = "";
   $("#pdf-status").textContent = "";
   $("#pdf-clear").hidden = true;
@@ -196,6 +234,14 @@ $("#fetch-missing").addEventListener("change", (event) => {
   persistView({ fetchMissing: event.target.checked });
   if (state.file) loadCertificates();
 });
+for (const b of document.querySelectorAll("[data-revocation]")) {
+  b.addEventListener("click", () => {
+    if (b.dataset.revocation === state.view.revocation) return;
+    persistView({ revocation: b.dataset.revocation });
+    applyRevocationMode();
+    if (state.file) loadVerify();
+  });
+}
 $("#validation-time").addEventListener("change", (event) => {
   persistView({ validationTime: event.target.value });
   if (state.file) loadVerify();
@@ -209,8 +255,8 @@ $("#diff-policy").addEventListener("change", (event) => {
 async function restore() {
   Object.assign(state.view, (await loadSaved("firmas-view")) || {});
   $("#fetch-missing").checked = state.view.fetchMissing;
-  $("#validation-time").value = state.view.validationTime;
   $("#diff-policy").value = state.view.diffPolicy;
+  applyRevocationMode();
   const fromHash = location.hash.slice(1);
   selectTab(TABS.includes(fromHash) ? fromHash : TABS.includes(state.view.tab) ? state.view.tab : "certificados");
 

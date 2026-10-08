@@ -6,19 +6,34 @@ por red y TestClient no expone un puerto real.
 
 import os
 import shutil
+import socket
 import tempfile
+import threading
+import time
 
-# Antes de importar la app: pki.PKI_DIR y store.DB_PATH se leen al importar los módulos,
-# y los tests no deben tocar la PKI de ./pki ni la fuente de certificados de ./certs.db.
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# Antes de importar la app: pki.PKI_DIR, pki.BASE_URL y store.DB_PATH se leen al importar
+# los módulos, y los tests no deben tocar la PKI de ./pki ni la fuente de ./certs.db. Las
+# URLs de CRL y OCSP de la PKI de prueba apuntan a un puerto libre, donde `pki_server`
+# sirve la app para el modo con conexión de /verify.
 _PKI_DIR = tempfile.mkdtemp(prefix="pades-test-pki-")
+_PORT = _free_port()
 os.environ["PKI_DIR"] = _PKI_DIR
 os.environ["CERT_STORE_DB"] = os.path.join(_PKI_DIR, "certs.db")
+os.environ["PUBLIC_BASE_URL"] = f"http://127.0.0.1:{_PORT}"
 
 from io import BytesIO  # noqa: E402
 
 import pytest  # noqa: E402
 import requests  # noqa: E402
 from demo import minimal_pdf  # noqa: E402
+import uvicorn  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter  # noqa: E402
 from pyhanko.sign import fields, signers  # noqa: E402
@@ -37,6 +52,25 @@ def pytest_unconfigure(config):
 def client():
     with TestClient(app) as c:  # el lifespan genera la PKI en _PKI_DIR
         yield c
+
+
+@pytest.fixture(scope="session")
+def pki_server(client):
+    """La misma app escuchando en PUBLIC_BASE_URL, para que se puedan descargar sus CRL y OCSP.
+
+    Sin lifespan: comparte `app.state` (y la PKI) con el TestClient, que ya lo levantó.
+    """
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=_PORT, lifespan="off", log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError("uvicorn no arrancó")
+        time.sleep(0.05)
+    yield pki.BASE_URL
+    server.should_exit = True
+    thread.join(timeout=5)
 
 
 @pytest.fixture(scope="session")

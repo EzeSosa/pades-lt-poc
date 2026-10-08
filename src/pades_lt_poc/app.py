@@ -32,7 +32,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from . import pki
 from .routers import certificates, ocsp, signing, store, tsa, ui, verification
@@ -63,7 +62,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
 for module in (pki_router, ocsp, tsa, signing, verification, certificates, store, ui):
     app.include_router(module.router)
-app.mount("/ui/static", StaticFiles(directory=ui.STATIC_DIR), name="ui-static")
+app.mount("/ui/static", ui.RevalidatedStaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 
 
 @app.exception_handler(UnprocessableInput)

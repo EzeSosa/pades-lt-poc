@@ -4,6 +4,10 @@ Es lo que usa el validador además del PDF: las raíces marcadas como confiables
 las anclas de confianza de /verify, y los intermedios habilitados completan cadenas
 (en /verify y en /certificates) cuando el PDF no los trae. Se carga en memoria al
 arrancar y se vuelve a cargar después de cada cambio, sin reiniciar la app.
+
+La copia en memoria es de cada proceso: con varios workers (o varias instancias sobre
+la misma base), un cambio sólo llega al proceso que lo atendió hasta que los demás se
+reinicien. La PoC corre con un solo worker.
 """
 
 from __future__ import annotations
@@ -124,7 +128,7 @@ class CertificateStore:
         return _row(row)
 
     # ----------------------------------------------------------------------- ABM
-    def add(self, data: bytes, *, trusted: bool = True, notes: str = "", origin: Origin = "manual") -> dict:
+    def add(self, data: bytes, *, trusted: bool = False, notes: str = "", origin: Origin = "manual") -> dict:
         """Agrega los certificados de `data` (DER, PEM, PKCS#7 o base64).
 
         Sólo acepta CAs. Una raíz queda como ancla de confianza si `trusted`; un intermedio
@@ -209,15 +213,17 @@ class CertificateStore:
         return _row(self._db.execute("SELECT * FROM certificates WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
     def _reload(self) -> None:
+        # Leer y asignar bajo el mismo lock: si no, con dos cambios a la vez la copia más
+        # vieja puede quedar asignada última.
         with self._lock:
             rows = self._db.execute("SELECT sha256, der, kind, trusted, enabled FROM certificates").fetchall()
-        enabled = [r for r in rows if r["enabled"]]
-        self._snapshot = StoreSnapshot(
-            trusted_roots=tuple(asn1_x509.Certificate.load(r["der"]) for r in enabled if r["trusted"]),
-            intermediates=tuple(asn1_x509.Certificate.load(r["der"]) for r in enabled if r["kind"] == "intermediate"),
-            chain_certs=tuple(x509.load_der_x509_certificate(r["der"]) for r in enabled),
-            sha256=frozenset(r["sha256"] for r in rows),
-        )
+            enabled = [r for r in rows if r["enabled"]]
+            self._snapshot = StoreSnapshot(
+                trusted_roots=tuple(asn1_x509.Certificate.load(r["der"]) for r in enabled if r["trusted"]),
+                intermediates=tuple(asn1_x509.Certificate.load(r["der"]) for r in enabled if r["kind"] == "intermediate"),
+                chain_certs=tuple(x509.load_der_x509_certificate(r["der"]) for r in enabled),
+                sha256=frozenset(r["sha256"] for r in rows),
+            )
 
 
 def _row(row: sqlite3.Row) -> dict:

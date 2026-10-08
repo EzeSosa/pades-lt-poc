@@ -95,14 +95,14 @@ def test_add_intermediate_is_never_trusted(client):
     assert client.get(f"/store/certificates/{added['id']}").json()["sha256"] == added["sha256"]
 
 
-def test_add_root_trusted_by_default_or_not(client):
+def test_add_root_untrusted_by_default(client):
     r = add(client, b64=pem(pki.ROOT), origin="pdf")
     [root] = r.json()["added"]
-    assert (root["kind"], root["trusted"], root["origin"]) == ("root", True, "pdf")
+    assert (root["kind"], root["trusted"], root["origin"]) == ("root", False, "pdf")
 
     client.delete(f"/store/certificates/{root['id']}")
-    [root] = add(client, b64=pem(pki.ROOT), trusted="false").json()["added"]
-    assert root["trusted"] is False
+    [root] = add(client, b64=pem(pki.ROOT), trusted="true").json()["added"]
+    assert root["trusted"] is True
 
 
 def test_add_pkcs7_and_duplicates(client):
@@ -223,11 +223,13 @@ def verify(client, pdf: bytes) -> dict:
 def test_verify_completes_from_store_and_says_so(client, pdf):
     signed = pdf_without_intermediate(pdf)
 
-    # Sin la intermedia no hay camino hasta la raíz.
+    # Sin la intermedia no hay camino hasta la raíz, y el reporte lo dice.
     body = verify(client, signed)
     [sig] = body["signatures"]
     assert sig["trusted"] is False
     assert sig["completed_from_store"] == []
+    assert sig["trust_problem"]["reason"] == "no_path"
+    assert "fuente" in sig["trust_problem"]["hint"]
 
     # Con la intermedia en la fuente valida, pero avisa que el PDF no alcanza solo.
     add(client, b64=pem(pki.INTERMEDIATE))
@@ -235,6 +237,7 @@ def test_verify_completes_from_store_and_says_so(client, pdf):
     [sig] = body["signatures"]
     assert sig["trusted"] is True
     assert sig["bottom_line"] is True
+    assert sig["trust_problem"] is None
     intermediate = pki.entity(pki.INTERMEDIATE).cert()
     assert sig["completed_from_store"] == [
         {
@@ -250,6 +253,27 @@ def test_verify_completes_from_store_and_says_so(client, pdf):
     entry = by_subject(client, "PoC Intermediate CA")
     client.patch(f"/store/certificates/{entry['id']}", json={"enabled": False})
     assert verify(client, signed)["signatures"][0]["trusted"] is False
+
+
+def test_failed_validation_does_not_credit_store(client, pdf):
+    """Si la firma no valida (aquí, sin DSS no hay revocación), no se informa que la fuente completó la cadena."""
+    add(client, b64=pem(pki.INTERMEDIATE))
+    body = verify(client, sign(pdf, load_signer(chain=())))
+    [sig] = body["signatures"]
+    assert sig["trusted"] is False
+    assert sig["completed_from_store"] == []
+    assert body["certificate_store"]["self_contained"] is True
+    assert body["certificate_store"]["note"] is None
+
+    # El motivo: hay camino (la intermedia vino de la fuente), pero no hay revocación.
+    problem = sig["trust_problem"]
+    assert problem["reason"] == "missing_revocation"
+    assert problem["indication"] is not None
+    [path] = problem["paths"]
+    intermediate = pki.entity(pki.INTERMEDIATE).cert()
+    assert path["chain"][1]["subject"] == "PoC Intermediate CA"
+    assert path["chain"][1]["sha256"] == intermediate.fingerprint(hashes.SHA256()).hex()
+    assert path["reason"] == "missing_revocation" and path["message"]
 
 
 def test_self_contained_pdf_does_not_use_store(client, pdf):

@@ -14,6 +14,17 @@ const MODIFICATIONS = {
   OTHER: ["Otros cambios", "bad"],
 };
 
+// Motivo de cada camino probado cuando la firma no es confiable (trust_problem.paths[].reason).
+const PATH_REASONS = {
+  revoked: ["Revocado", "bad"],
+  stale_revocation: ["Revocación vencida", "warn"],
+  missing_revocation: ["Sin revocación", "warn"],
+  algorithm: ["Algoritmo no permitido", "bad"],
+  expired: ["Certificado vencido", "warn"],
+  not_yet_valid: ["Todavía no vigente", "warn"],
+  other: ["No valida", "bad"],
+};
+
 function yesNo(value, yes, no) {
   return value ? badge(yes, "ok") : badge(no, "bad");
 }
@@ -32,7 +43,14 @@ function overviewCell(label, value, sub, valueClass = "value") {
   return cell;
 }
 
+function revocationCell(revocation) {
+  if (revocation.mode !== "online") return overviewCell("Revocación", "Sólo la del PDF", "Sin conexión: CRL y OCSP embebidas");
+  const { crls, ocsps } = revocation.fetched;
+  return overviewCell("Revocación", "Descargada", `Con conexión: ${plural(crls.length, "CRL", "CRL")} · ${ocsps.length} OCSP, además de lo del PDF`);
+}
+
 function overview(body, sigs) {
+  const online = body.revocation.mode === "online";
   const ok = sigs.filter((s) => s.bottom_line).length;
   const grid = el("section", "overview");
   grid.setAttribute("aria-label", "Resumen");
@@ -42,8 +60,11 @@ function overview(body, sigs) {
     overviewCell(
       "DSS",
       body.dss ? `${body.dss.Certs} certs · ${body.dss.OCSPs} OCSP · ${body.dss.CRLs} CRL` : "No tiene",
-      body.dss ? "Material de validación embebido" : "Sin DSS no hay revocación: ninguna firma es confiable",
+      body.dss
+        ? "Material de validación embebido"
+        : online ? "Sin DSS: la revocación salió sólo de lo descargado" : "Sin DSS no hay revocación: ninguna firma es confiable",
     ),
+    revocationCell(body.revocation),
     overviewCell(
       "Fuente de certificados",
       `${plural(body.certificate_store.trusted_roots, "raíz", "raíces")} · ${plural(body.certificate_store.intermediates, "intermedio", "intermedios")}`,
@@ -66,13 +87,82 @@ function fromStore(list) {
   return wrap;
 }
 
+// El porqué de "No confiable", para la fila de la ficha; [] si es confiable.
+function problemFacts(problem) {
+  if (!problem) return [];
+  return [el("span", "problem", problem.summary), problem.hint && el("span", "sub", problem.hint)];
+}
+
+// Los caminos que se probaron hasta una raíz y por qué falló cada uno, de la hoja a la raíz.
+function pathsDetails(sig) {
+  const sections = [
+    ["Firmante", sig.trust_problem],
+    ["Sello de tiempo", sig.signature_timestamp?.trust_problem],
+  ].filter(([, problem]) => problem?.paths.length);
+  if (!sections.length) return null;
+
+  const details = el("details");
+  const summary = el("summary");
+  summary.append(el("strong", null, "Por qué no es confiable"), el("span", "sub", "Caminos probados hasta una raíz"), el("span", "toggle", "Ver"));
+  details.append(summary);
+  for (const [label, problem] of sections) {
+    const list = el("ul", "paths");
+    list.setAttribute("aria-label", `Caminos probados · ${label}`);
+    list.append(...problem.paths.map((path) => {
+      const li = el("li");
+      const head = el("div", "path-head");
+      const [text, tone] = path.reason ? PATH_REASONS[path.reason] || [path.reason, "bad"] : ["Valida", "ok"];
+      const chain = path.chain.map((c) => `${c.subject} (hasta ${date(c.not_after)})`).join(" → ");
+      head.append(el("span", "role", label), el("span", "path-chain", chain), badge(text, tone));
+      li.append(head);
+      if (path.message) li.append(el("span", "mono sub", path.message));
+      return li;
+    }));
+    details.append(list);
+  }
+  return details;
+}
+
+// Lo descargado en modo con conexión: CRLs, respuestas OCSP y emisores por AIA.
+function fetchedDetails(fetched) {
+  const items = [
+    ...fetched.crls.map((c) => [
+      "CRL",
+      commonName(c.issuer),
+      [
+        c.next_update ? `vigente hasta ${when(c.next_update)}` : "sin próxima actualización",
+        c.from_cache && `del caché: descargada ${when(c.fetched_at)}`,
+      ].filter(Boolean).join(" · "),
+    ]),
+    ...fetched.ocsps.map((r) => ["OCSP", `Serie ${r.serial_number}: ${r.status === "good" ? "no revocado" : r.status}`, `emitida ${when(r.produced_at)}`]),
+    ...fetched.certs.map((c) => ["AIA", commonName(c.subject), "emisor descargado"]),
+  ];
+  if (!items.length) return null;
+
+  const details = el("details");
+  const summary = el("summary");
+  summary.append(el("strong", null, "Revocación descargada"), el("span", "sub", plural(items.length, "elemento", "elementos")), el("span", "toggle", "Ver"));
+  const list = el("ul", "paths");
+  list.append(...items.map(([kind, what, sub]) => {
+    const li = el("li");
+    const head = el("div", "path-head");
+    head.append(el("span", "role", kind), el("span", "path-chain", what));
+    li.append(head, el("span", "sub", sub));
+    return li;
+  }));
+  details.append(summary, list);
+  const article = el("article", "fetched");
+  article.append(details);
+  return article;
+}
+
 function callout(tone, title, text) {
   const box = el("div", `callout ${tone}`);
   box.append(el("strong", null, title), document.createTextNode(text));
   return box;
 }
 
-function signatureReportCard(sig) {
+function signatureReportCard(sig, online) {
   const article = el("article");
   const head = el("div", "card-head");
   head.append(el("h3", null, sig.field));
@@ -99,7 +189,13 @@ function signatureReportCard(sig) {
     ["Firmante", el("strong", null, commonName(sig.signer)), el("span", "sub", sig.signer)],
     ["Integridad", yesNo(sig.intact, "Íntegra", "Alterada"), el("span", "sub", "El contenido firmado no cambió")],
     ["Firma criptográfica", yesNo(sig.valid, "Válida", "Inválida")],
-    ["Confianza", yesNo(sig.trusted, "Confiable", "No confiable"), el("span", "sub", "Cadena hasta una raíz de confianza, con revocación embebida"), fromStore(sig.completed_from_store)],
+    [
+      "Confianza",
+      yesNo(sig.trusted, "Confiable", "No confiable"),
+      el("span", "sub", online ? "Cadena hasta una raíz de confianza, con revocación embebida o descargada" : "Cadena hasta una raíz de confianza, con revocación embebida"),
+      fromStore(sig.completed_from_store),
+      ...problemFacts(sig.trust_problem),
+    ],
     ["Cobertura", badge(coverage, coverageTone), coverageNote && el("span", "sub", coverageNote)],
     [
       "Modificaciones",
@@ -116,6 +212,7 @@ function signatureReportCard(sig) {
             yesNo(ts.valid, "Válido", "Inválido"),
             yesNo(ts.trusted, "Confiable", "No confiable"),
             fromStore(ts.completed_from_store),
+            ...problemFacts(ts.trust_problem),
           ]
         : [badge("Sin sello", "warn"), el("span", "sub", "Sin sello no llega a B-T")]),
     ],
@@ -131,6 +228,8 @@ function signatureReportCard(sig) {
   const summary = el("summary");
   summary.append(el("strong", null, "Detalle de pyHanko"), el("span", "toggle", "Ver"));
   details.append(summary, el("pre", null, sig.details));
+  const paths = pathsDetails(sig);
+  if (paths) article.append(paths);
   article.append(details);
   return article;
 }
@@ -148,10 +247,13 @@ function renderReport(fileName, body) {
 
   if (body.validation_time.warning) fragment.append(callout("warn", "Validado a la hora declarada", body.validation_time.warning));
   if (body.diff_policy.note) fragment.append(callout("warn", "Análisis de modificaciones relajado", body.diff_policy.note));
+  if (body.revocation.note) fragment.append(callout("warn", "Validado con conexión: revocación descargada", body.revocation.note));
   if (body.certificate_store.note) fragment.append(callout("warn", "Cadena completada con la fuente de certificados", body.certificate_store.note));
+  const fetched = body.revocation.fetched && fetchedDetails(body.revocation.fetched);
+  if (fetched) fragment.append(fetched);
 
   const cards = el("div", "cards");
-  cards.append(...body.signatures.map(signatureReportCard));
+  cards.append(...body.signatures.map((s) => signatureReportCard(s, body.revocation.mode === "online")));
   fragment.append(cards);
   return fragment;
 }
