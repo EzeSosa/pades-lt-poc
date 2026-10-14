@@ -1,0 +1,500 @@
+{
+  "description": "Suite de PDFs para APIs de firma. Ver README.md.",
+  "sign_values": {
+    "ok": "devuelve PDF firmado válido",
+    "reject": "4xx con mensaje",
+    "ok_or_reject": "cualquiera de las dos; nunca 5xx"
+  },
+  "categories": {
+    "estructura": "Variantes válidas de la estructura del archivo",
+    "tolerancia": "Archivos imperfectos que circulan en la práctica",
+    "contenido": "Páginas, tamaño y metadatos",
+    "seguridad": "Cifrado y certificación (DocMDP)",
+    "formularios": "AcroForm y campos de firma existentes",
+    "firmados": "PDFs que ya traen firmas",
+    "entrada": "Entradas inválidas y parámetros de la API"
+  },
+  "cases": [
+    {
+      "id": "E01",
+      "file": "estructura/E01-base.pdf",
+      "category": "estructura",
+      "title": "Documento mínimo correcto",
+      "problem": "Línea de base: PDF 1.7 de una página, xref clásica y Helvetica sin embeber.",
+      "expected": "Se firma. Si este falla, el resto de la suite no dice nada.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E02",
+      "file": "estructura/E02-pdf-1.4.pdf",
+      "category": "estructura",
+      "title": "Versión de cabecera 1.4",
+      "problem": "Documentos viejos o generados por herramientas antiguas. Algunos firmantes suben la versión de cabecera reescribiendo el archivo, lo que invalida firmas previas.",
+      "expected": "Se firma por actualización incremental, sin reescribir los bytes originales.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E03",
+      "file": "estructura/E03-pdf-2.0.pdf",
+      "category": "estructura",
+      "title": "Versión de cabecera 2.0",
+      "problem": "PDF 2.0 (ISO 32000-2). Librerías viejas lo rechazan por la versión aunque la estructura sea la misma.",
+      "expected": "Se firma. Si se rechaza, que sea con un mensaje claro y no con un 500.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E04",
+      "file": "estructura/E04-xref-stream.pdf",
+      "category": "estructura",
+      "title": "Cross-reference stream y object streams",
+      "problem": "Lo que generan Word, LibreOffice, Chrome y la mayoría de las herramientas modernas: sin tabla xref de texto, con objetos comprimidos dentro de object streams.",
+      "expected": "Se firma. La revisión agregada puede usar xref stream o tabla, pero la firma previa al archivo tiene que seguir intacta.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E05",
+      "file": "estructura/E05-revisiones-incrementales.pdf",
+      "category": "estructura",
+      "title": "Varias revisiones incrementales previas",
+      "problem": "El archivo ya tiene tres revisiones (/Prev encadenados). Pasa con documentos editados varias veces o rellenados en Acrobat antes de firmar.",
+      "expected": "Se firma. El ByteRange de la nueva firma cubre todo el archivo, incluidas las revisiones previas.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E06",
+      "file": "estructura/E06-fin-de-linea-crlf.pdf",
+      "category": "estructura",
+      "title": "Fines de línea CRLF",
+      "problem": "Archivos generados en Windows o que pasaron por una conversión de texto. Los parsers que buscan `\\n` a mano calculan mal offsets.",
+      "expected": "Se firma.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "E07",
+      "file": "estructura/E07-sin-eol-final.pdf",
+      "category": "estructura",
+      "title": "Sin fin de línea después de %%EOF",
+      "problem": "El archivo termina justo en `%%EOF`. Un firmante que concatena la revisión nueva sin agregar un fin de línea deja `%%EOF1 0 obj`, que algunos lectores no aceptan.",
+      "expected": "Se firma, y la revisión nueva empieza en una línea propia.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "T01",
+      "file": "tolerancia/T01-bytes-despues-de-eof.pdf",
+      "category": "tolerancia",
+      "title": "Bytes después de %%EOF",
+      "problem": "Relleno con ceros o espacios al final, típico de sistemas de correo, escáneres y almacenamiento que redondea a bloques.",
+      "expected": "Se firma, o se rechaza con 422. Si se firma, el resultado tiene que validar en Acrobat: el relleno queda dentro del ByteRange.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "T02",
+      "file": "tolerancia/T02-bytes-antes-de-cabecera.pdf",
+      "category": "tolerancia",
+      "title": "Bytes antes de la cabecera %PDF",
+      "problem": "Archivos con basura al principio (cabeceras MIME o de otro formato). Los offsets de la xref quedan corridos respecto del inicio del archivo.",
+      "expected": "Se rechaza con 422, o se firma de forma que el resultado valide. No se acepta un 500 ni un PDF firmado que después no abre.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "T03",
+      "file": "tolerancia/T03-xref-desplazada.pdf",
+      "category": "tolerancia",
+      "title": "Offsets de la xref incorrectos",
+      "problem": "La tabla xref apunta 7 bytes antes de cada objeto, como pasa cuando alguien edita el PDF como texto. Los lectores la reconstruyen; una firma incremental sobre una xref rota puede validar en una herramienta y no en otra.",
+      "expected": "Se rechaza con 422, o se firma sólo si la revisión original queda intacta. Nunca un 500.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C01",
+      "file": "contenido/C01-300-paginas.pdf",
+      "category": "contenido",
+      "title": "300 páginas",
+      "problem": "Expedientes largos. Detecta timeouts y procesos que recorren todas las páginas sin necesidad.",
+      "expected": "Se firma en un tiempo razonable (medirlo).",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C02",
+      "file": "contenido/C02-paginas-rotadas-y-tamanos-mixtos.pdf",
+      "category": "contenido",
+      "title": "Páginas rotadas y de tamaños distintos",
+      "problem": "A4, oficio y A3 apaisada, con /Rotate 90 y 270. Las firmas visibles calculan mal la posición o quedan giradas.",
+      "expected": "Se firma. Si la firma es visible, el sello queda derecho y dentro de la página.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C03",
+      "file": "contenido/C03-atributos-heredados.pdf",
+      "category": "contenido",
+      "title": "MediaBox y Resources heredados",
+      "problem": "Las páginas no tienen /MediaBox ni /Resources propios: los heredan del nodo /Pages. Un estampador que lee sólo la página no encuentra el tamaño ni las fuentes.",
+      "expected": "Se firma.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C04",
+      "file": "contenido/C04-25-mb.pdf",
+      "category": "contenido",
+      "title": "Archivo de unos 25 MB",
+      "problem": "Límites de subida (proxy, framework, gateway) y lecturas completas en memoria. El contenido es una imagen sin comprimir, que git guarda comprimida.",
+      "expected": "Se firma, o se rechaza con 413 y un mensaje claro si supera el límite documentado.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C05",
+      "file": "contenido/C05-metadatos-unicode.pdf",
+      "category": "contenido",
+      "title": "Metadatos Unicode y XMP",
+      "problem": "Título, autor y asunto en UTF-16BE con acentos, eñes y caracteres fuera de Latin-1, más un paquete XMP. Rompe a quien loguea o propaga metadatos asumiendo ASCII.",
+      "expected": "Se firma y los metadatos se conservan.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C06",
+      "file": "contenido/C06-declara-pdfa-2b.pdf",
+      "category": "contenido",
+      "title": "Declara PDF/A-2B",
+      "problem": "El XMP declara PDF/A-2B (pdfaid). Archivo exigido en muchos organismos. Una firma visible con fuente sin embeber, o una revisión que reescribe el archivo, rompe la conformidad. El archivo sólo la declara: verificar el resultado con veraPDF.",
+      "expected": "Se firma por actualización incremental y el resultado sigue declarando PDF/A.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C07",
+      "file": "contenido/C07-adjunto.pdf",
+      "category": "contenido",
+      "title": "Archivo adjunto embebido",
+      "problem": "Un XML adjunto (EmbeddedFiles), como en las facturas o en PDF/A-3. La firma tiene que cubrirlo.",
+      "expected": "Se firma y el adjunto se conserva.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "C08",
+      "file": "contenido/C08-pagina-vacia-sin-contents.pdf",
+      "category": "contenido",
+      "title": "Página sin /Contents ni /Resources",
+      "problem": "Página en blanco válida que no tiene stream de contenido. El código que asume que /Contents existe falla al estampar.",
+      "expected": "Se firma.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "S01",
+      "file": "seguridad/S01-cifrado-con-clave-de-apertura.pdf",
+      "category": "seguridad",
+      "title": "Cifrado con clave de apertura",
+      "problem": "Hace falta la clave para abrirlo (contraseña de usuario `usuario`, de propietario `propietario`). Sin clave no se puede firmar.",
+      "expected": "Se rechaza con 422 y un mensaje que diga que el PDF está protegido. Nunca un 500.",
+      "sign": "reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "S02",
+      "file": "seguridad/S02-cifrado-sin-clave-de-apertura.pdf",
+      "category": "seguridad",
+      "title": "Cifrado sólo con clave de propietario",
+      "problem": "Abre sin contraseña pero está cifrado y tiene permisos restringidos. Es muy común. Firmarlo exige escribir la revisión cifrada con la clave de propietario.",
+      "expected": "Se rechaza con 422 explicando la protección, o se firma respetando los permisos. Nunca un 500 ni una revisión sin cifrar mezclada con una cifrada.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "S03",
+      "file": "seguridad/S03-certificado-p1.pdf",
+      "category": "seguridad",
+      "title": "Certificado con DocMDP P=1",
+      "problem": "Firma de certificación que no permite ningún cambio. Cualquier firma nueva invalida la certificación.",
+      "expected": "Se rechaza con 422 explicando que el documento está certificado sin cambios permitidos.",
+      "sign": "reject",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "S04",
+      "file": "seguridad/S04-certificado-p2.pdf",
+      "category": "seguridad",
+      "title": "Certificado con DocMDP P=2",
+      "problem": "Firma de certificación que permite completar formularios y firmar. Es el flujo de un trámite que un organismo certifica y el ciudadano firma.",
+      "expected": "Se firma y la certificación sigue válida (cambio permitido).",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "F01",
+      "file": "formularios/F01-acroform.pdf",
+      "category": "formularios",
+      "title": "Formulario con campos completados",
+      "problem": "AcroForm con texto y casilla, con apariencias. Una firma tiene que agregarse al /Fields sin perder los campos existentes.",
+      "expected": "Se firma y los campos conservan sus valores.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "F02",
+      "file": "formularios/F02-need-appearances.pdf",
+      "category": "formularios",
+      "title": "Formulario con NeedAppearances true",
+      "problem": "El visor regenera las apariencias al abrir. Acrobat puede marcar el documento como modificado después de la firma.",
+      "expected": "Se firma. Idealmente el firmante genera las apariencias y quita NeedAppearances antes de firmar.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "F03",
+      "file": "formularios/F03-campo-de-firma-vacio.pdf",
+      "category": "formularios",
+      "title": "Campo de firma vacío preexistente",
+      "problem": "El documento trae un campo de firma `Firma1` sin firmar, preparado por quien emitió el trámite.",
+      "expected": "Se firma, ya sea en ese campo o en uno nuevo, sin errores por nombre duplicado.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "F04",
+      "file": "formularios/F04-campo-de-texto-llamado-firma1.pdf",
+      "category": "formularios",
+      "title": "Campo de texto con el nombre que el firmante elegiría",
+      "problem": "Un campo de texto se llama `Firma1`. El firmante que arma el nombre como `Firma{n+1}` choca con un campo que no es de firma.",
+      "expected": "Se firma con un nombre de campo libre. Nunca un 500.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "F05",
+      "file": "formularios/F05-firma-existente-llamada-firma2.pdf",
+      "category": "formularios",
+      "title": "Una firma existente en el campo Firma2",
+      "problem": "Hay una sola firma, pero su campo se llama `Firma2`. El firmante que cuenta firmas para elegir el nombre (`Firma{n+1}`) intenta usar un campo ya firmado.",
+      "expected": "Se co-firma con otro nombre de campo y la firma previa sigue intacta.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P01",
+      "file": "firmados/P01-firma-previa-pades.pdf",
+      "category": "firmados",
+      "title": "Firma PAdES previa de otra PKI",
+      "problem": "Co-firma: el documento ya trae una firma PAdES con sello de tiempo, de una CA que el validador no conoce.",
+      "expected": "Se firma y la firma previa queda intacta. La verificación la informa íntegra pero no confiable.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true,
+        "trusted": false
+      },
+      "upload": {}
+    },
+    {
+      "id": "P02",
+      "file": "firmados/P02-firma-previa-ecdsa.pdf",
+      "category": "firmados",
+      "title": "Firma previa ECDSA P-256",
+      "problem": "Algoritmo de clave distinto de RSA. Validadores que asumen RSA fallan al leer la clave o el algoritmo de firma.",
+      "expected": "Se firma y la verificación interpreta la firma ECDSA.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P03",
+      "file": "firmados/P03-firma-previa-pkcs7-detached.pdf",
+      "category": "firmados",
+      "title": "Firma previa adbe.pkcs7.detached",
+      "problem": "Subfiltro no PAdES, el más común en firmas viejas y de algunos productos. La verificación tiene que aceptarlo y no reportarlo como nivel PAdES.",
+      "expected": "Se firma. La verificación informa el subfiltro.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P04",
+      "file": "firmados/P04-firma-previa-sha512.pdf",
+      "category": "firmados",
+      "title": "Firma previa con digest SHA-512",
+      "problem": "Digest distinto del habitual SHA-256.",
+      "expected": "Se firma. La verificación la valida.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 1,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P05",
+      "file": "firmados/P05-dos-firmas-previas.pdf",
+      "category": "firmados",
+      "title": "Dos firmas previas",
+      "problem": "Circuito de varios firmantes. La tercera firma no puede alterar las dos anteriores.",
+      "expected": "Se firma y las tres firmas quedan íntegras.",
+      "sign": "ok",
+      "verify": {
+        "signatures": 2,
+        "intact": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P06",
+      "file": "firmados/P06-contenido-modificado-tras-firmar.pdf",
+      "category": "firmados",
+      "title": "Contenido de página cambiado después de firmar",
+      "problem": "Una revisión posterior a la firma reemplaza el texto de la página. La firma sigue siendo criptográficamente correcta para su revisión, pero el documento que se ve ya no es el firmado.",
+      "expected": "La verificación informa la modificación (no da la firma por buena para el documento completo). Firmarlo de nuevo no debe ocultar el problema.",
+      "sign": "ok_or_reject",
+      "verify": {
+        "signatures": 1,
+        "intact": true,
+        "modified": true
+      },
+      "upload": {}
+    },
+    {
+      "id": "P07",
+      "file": "firmados/P07-bytes-firmados-alterados.pdf",
+      "category": "firmados",
+      "title": "Bytes firmados alterados",
+      "problem": "Se cambió texto dentro del rango firmado sin tocar la estructura (mismo largo), como una corrupción en tránsito o una edición directa. El hash ya no coincide.",
+      "expected": "La verificación informa la firma como no íntegra.",
+      "sign": "ok_or_reject",
+      "verify": {
+        "signatures": 1,
+        "intact": false
+      },
+      "upload": {}
+    },
+    {
+      "id": "I01",
+      "file": "entrada/I01-vacio.pdf",
+      "category": "entrada",
+      "title": "Archivo vacío",
+      "problem": "0 bytes, como cuando el cliente sube antes de terminar de leer el archivo.",
+      "expected": "Se rechaza con 4xx y un mensaje claro.",
+      "sign": "reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "I02",
+      "file": "entrada/I02-no-es-pdf.pdf",
+      "category": "entrada",
+      "title": "Otro formato con extensión .pdf",
+      "problem": "Un PNG renombrado. Validar por extensión o content-type no alcanza.",
+      "expected": "Se rechaza con 4xx.",
+      "sign": "reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "I03",
+      "file": "entrada/I03-truncado.pdf",
+      "category": "entrada",
+      "title": "PDF truncado",
+      "problem": "Descarga o subida cortada a la mitad: sin xref ni %%EOF.",
+      "expected": "Se rechaza con 4xx, o se firma sólo si el resultado valida. Nunca un 500.",
+      "sign": "ok_or_reject",
+      "verify": null,
+      "upload": {}
+    },
+    {
+      "id": "I04",
+      "file": "estructura/E01-base.pdf",
+      "category": "entrada",
+      "title": "Nombre de archivo con caracteres no ASCII",
+      "problem": "El nombre del archivo subido viaja al header Content-Disposition de la respuesta. Con caracteres fuera de Latin-1 el header no se puede codificar si no se usa `filename*` (RFC 6266).",
+      "expected": "Se firma y la respuesta trae un nombre de descarga correcto.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {
+        "filename": "Resolución Nº 123 – año 2026 ✓.pdf"
+      }
+    },
+    {
+      "id": "I05",
+      "file": "estructura/E01-base.pdf",
+      "category": "entrada",
+      "title": "Nombre de archivo con comillas y extensión en mayúsculas",
+      "problem": "Comillas dentro del nombre rompen un `filename=\"...\"` armado a mano; `.PDF` en mayúsculas no coincide con un `removesuffix('.pdf')`.",
+      "expected": "Se firma y el nombre de descarga es válido y termina en .pdf una sola vez.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {
+        "filename": "Nota \"urgente\".PDF"
+      }
+    },
+    {
+      "id": "I06",
+      "file": "estructura/E01-base.pdf",
+      "category": "entrada",
+      "title": "Motivo y lugar con Unicode",
+      "problem": "Los campos /Reason y /Location se escriben como strings PDF: con caracteres fuera de PDFDocEncoding hay que usar UTF-16BE.",
+      "expected": "Se firma y el motivo se lee igual en Acrobat.",
+      "sign": "ok",
+      "verify": null,
+      "upload": {
+        "form": {
+          "reason": "Aprobación — Dirección de Ñandúes 📄",
+          "location": "San Martín de los Andes, AR"
+        }
+      }
+    }
+  ]
+}

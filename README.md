@@ -38,7 +38,10 @@ uv sync
 uv run pades-lt-poc                  # http://127.0.0.1:8000  (redirige a la UI; el Swagger está en /docs)
 uv run python scripts/demo.py        # firma out/documento.pdf y lo verifica
 uv run python scripts/demo.py --lta  # idem, en B-LTA
+uv run python scripts/run_pdf_suite.py  # corre la suite de PDFs de prueba contra /sign y /verify
 ```
+
+La suite de PDFs de prueba (estructuras, cifrado, certificación, formularios, firmas previas, entradas inválidas) está en [testdata/pdf-suite](testdata/pdf-suite/README.md), con qué prueba cada archivo y qué se espera. No depende de esta PoC: sirve para cualquier API de firma.
 
 ## Fuente de certificados
 
