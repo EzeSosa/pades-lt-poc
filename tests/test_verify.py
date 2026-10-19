@@ -8,7 +8,7 @@ from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 from conftest import load_signer, sign
-from pades_lt_poc.services.store import SEED_DIR
+from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
 from pades_lt_poc.services.verification import (
     CLAIMED_TIME_WARNING,
     UNALLOCATED_FREES_NOTE,

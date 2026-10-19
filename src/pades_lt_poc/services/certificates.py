@@ -27,7 +27,7 @@ from ..adapters.outbound.crypto.codec import issued_by, parse_certs
 from . import read_signed_pdf
 
 if TYPE_CHECKING:
-    from .store import CertificateStore
+    from ..application.use_cases.certificate_source import CertificateSource
 
 AIA_TIMEOUT = 5  # segundos por descarga
 
@@ -44,18 +44,18 @@ class CertificateExtractor:
     Es bloqueante (descargas AIA): llamarlo fuera del event loop.
     """
 
-    def __init__(self, store: CertificateStore | None = None) -> None:
-        self.store = store
+    def __init__(self, source: CertificateSource | None = None) -> None:
+        self.source = source
 
     def extract(self, pdf: bytes, fetch_missing: bool) -> dict:
         reader = read_signed_pdf(pdf)
         dss_certs: list[asn1_x509.Certificate] = (
             list(DocumentSecurityStore.read_dss(reader).load_certs()) if "/DSS" in reader.root else []
         )
-        snapshot = self.store.snapshot() if self.store else None
+        snapshot = self.source.snapshot() if self.source else None
         # Lo que no trae el PDF se busca en la fuente (habilitados) antes que por AIA.
         store_extra = [
-            (asn1_x509.Certificate.load(c.public_bytes(serialization.Encoding.DER)), "store")
+            (asn1_x509.Certificate.load(c.der), "store")
             for c in (snapshot.chain_certs if snapshot else ())
         ]
         fetcher = AiaFetcher() if fetch_missing else None
@@ -75,7 +75,7 @@ class CertificateExtractor:
                 )
             results.append(entry)
 
-        in_store = snapshot.sha256 if snapshot else frozenset()
+        in_store = snapshot.known_sha256 if snapshot else frozenset()
         for entry in results:
             for chain in (entry, entry.get("signature_timestamp") or {}):
                 for cert in chain.get("certificates") or []:

@@ -11,7 +11,7 @@ from conftest import pki
 from pades_lt_poc.adapters.outbound.crypto.codec import CryptographyCertificateCodec, issued_by, parse_certs
 from pades_lt_poc.domain.certificates import CaKind
 from pades_lt_poc.domain.errors import UnprocessableCertificate
-from pades_lt_poc.services.store import SEED_DIR
+from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
 
 Enc = serialization.Encoding
 codec = CryptographyCertificateCodec()

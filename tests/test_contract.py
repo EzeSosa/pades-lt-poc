@@ -6,7 +6,8 @@ forma de la respuesta (un campo que falta, un orden distinto, un mensaje reescri
 
 La PKI de prueba se regenera en cada corrida, así que antes de comparar se normaliza lo que
 cambia: huellas, seriales, DER y key ids de sus certificados (por un nombre estable, como
-`<sha256:signer>`), horas, ids de la fuente y días restantes. Los certificados de la carga
+`<sha256:signer>`), horas, ids de la fuente y días restantes. La vigencia de los certificados de
+la carga inicial también, porque depende del calendario. Los certificados de la carga
 inicial también se nombran, para que se lea qué es cada uno.
 
 Para regenerar los goldens después de un cambio de contrato buscado:
@@ -30,7 +31,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 from conftest import doc_timestamp, load_signer, pki, sign
-from pades_lt_poc.services.store import SEED_DIR, SEEDS
+from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR, SEEDS
 from test_store import pdf_without_intermediate
 from test_verify import with_free_entry
 
@@ -72,9 +73,23 @@ def _aliases() -> dict[str, str]:
     return out
 
 
+def _seed_validity(entry: dict) -> None:
+    """La vigencia de los certificados de la carga inicial depende del calendario (la AC Raíz 2007 y la
+    AC ONTI vencen el 2027-11-17), así que no es parte del contrato. La de la PKI de prueba sí: se
+    genera en cada corrida y siempre está vigente."""
+    sha256 = entry.get("sha256") or (entry.get("fingerprints") or {}).get("sha256") or ""
+    if not sha256.startswith("<sha256:seed-"):
+        return
+    if "validity_status" in entry:
+        entry["validity_status"] = "<seed-validity>"
+    if isinstance(entry.get("validity"), dict):
+        entry["validity"]["status"] = "<seed-validity>"
+
+
 def normalize(value, aliases: dict[str, str], key: str | None = None):
     if isinstance(value, dict):
         out = {k: normalize(v, aliases, k) for k, v in value.items()}
+        _seed_validity(out)
         if key == "fetched":
             # Con conexión las descargas corren en paralelo: el orden de cada lista no es parte del contrato.
             out = {k: sorted(v, key=lambda e: json.dumps(e, sort_keys=True)) for k, v in out.items()}
@@ -123,10 +138,10 @@ def fresh_state(client, services):
     """La fuente queda como la carga inicial y el caché de CRLs vacío, antes y después de cada caso."""
 
     def reset():
-        store = services.store
-        for cert in store.list():
-            store.delete(cert["id"])
-        store.restore_seed()
+        source = services.source
+        for entry in source.list():
+            source.delete(entry.id)
+        source.restore_seed()
         services.crl_cache.clear()
         pki.unrevoke_all()
 

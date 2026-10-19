@@ -5,12 +5,13 @@ from typing import Annotated
 from fastapi import Depends, Request
 from pyhanko.sign.timestamps import DummyTimeStamper
 
+from .application.ports import Clock
+from .application.use_cases.certificate_source import CertificateSource
 from .bootstrap import Services
 from .pki import MiniPki
 from .services.certificates import CertificateExtractor
 from .services.inspection import CertificateInspector
 from .services.signing import PdfSigner
-from .services.store import CertificateStore
 from .services.verification import SignatureVerifier
 
 
@@ -42,8 +43,12 @@ def get_certificate_inspector(request: Request) -> CertificateInspector:
     return services(request).certificate_inspector
 
 
-def get_certificate_store(request: Request) -> CertificateStore:
-    return services(request).store
+def get_certificate_source(request: Request) -> CertificateSource:
+    return services(request).source
+
+
+def get_clock(request: Request) -> Clock:
+    return services(request).clock
 
 
 PkiDep = Annotated[MiniPki, Depends(get_pki)]
@@ -52,4 +57,5 @@ SignerDep = Annotated[PdfSigner, Depends(get_signer)]
 VerifierDep = Annotated[SignatureVerifier, Depends(get_verifier)]
 CertificateExtractorDep = Annotated[CertificateExtractor, Depends(get_certificate_extractor)]
 CertificateInspectorDep = Annotated[CertificateInspector, Depends(get_certificate_inspector)]
-CertificateStoreDep = Annotated[CertificateStore, Depends(get_certificate_store)]
+CertificateSourceDep = Annotated[CertificateSource, Depends(get_certificate_source)]
+ClockDep = Annotated[Clock, Depends(get_clock)]

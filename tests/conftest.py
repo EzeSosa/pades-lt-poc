@@ -14,6 +14,8 @@ import socket
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -32,6 +34,26 @@ from pades_lt_poc.pki import MiniPki
 from pades_lt_poc.services import certificates as certificates_service
 
 
+class TestClock:
+    """El reloj de la app de los tests: la hora real, salvo dentro de `frozen_at(momento)`."""
+
+    __test__ = False  # no es una clase de tests
+
+    def __init__(self) -> None:
+        self._frozen: datetime | None = None
+
+    def now(self) -> datetime:
+        return self._frozen or datetime.now(UTC)
+
+    @contextmanager
+    def frozen_at(self, moment: datetime):
+        self._frozen = moment
+        try:
+            yield
+        finally:
+            self._frozen = None
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -48,7 +70,8 @@ SETTINGS = Settings(
 # La misma PKI que usa la app (misma carpeta y URL), para que los tests lean sus certificados
 # y claves, revoquen y armen CRLs y respuestas OCSP. La genera el lifespan de `client`.
 pki = MiniPki(SETTINGS.pki_dir, SETTINGS.public_base_url)
-app = create_app(SETTINGS)
+CLOCK = TestClock()
+app = create_app(SETTINGS, CLOCK)
 
 
 def pytest_unconfigure(config):
@@ -65,6 +88,12 @@ def client():
 def services(client):
     """Los servicios que armó la raíz de composición (`bootstrap.build`) para la app de los tests."""
     return client.app.state.services
+
+
+@pytest.fixture
+def clock() -> TestClock:
+    """El reloj de la app: `with clock.frozen_at(momento):` fija la hora que usan la fuente y sus respuestas."""
+    return CLOCK
 
 
 @pytest.fixture(scope="session")

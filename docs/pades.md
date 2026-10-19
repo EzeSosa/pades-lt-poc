@@ -122,7 +122,7 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 **Validar un camino** (RFC 5280 §6) significa comprobar, para cada eslabón: la firma del emisor, las fechas de validez, las extensiones (que una CA sea realmente CA, que la clave tenga el uso correcto) y el estado de revocación.
 
-> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`SignatureVerifier.trust_roots()`) se suman las raíces confiables de la **fuente de certificados** (`CertificateStore`, una tabla SQLite que se administra por `/store/certificates`); su carga inicial trae las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)), de `src/pades_lt_poc/seed/`. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
+> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`SignatureVerifier.trust_roots()`) se suman las raíces confiables de la **fuente de certificados** (el caso de uso `CertificateSource`, sobre una tabla SQLite que se administra por `/store/certificates`); su carga inicial trae las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)), de `src/pades_lt_poc/seed/`. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
 ### Rotación de la raíz
 
@@ -554,7 +554,7 @@ pyHanko resume una falla de confianza en una indicación AdES (`CERTIFICATE_CHAI
 
 ### La fuente de certificados
 
-Un validador real no confía en lo que el PDF dice de sí mismo: necesita sus propias **anclas de confianza**, y le conviene tener a mano los **intermedios** de las PKIs que valida, porque muchos firmadores no los embeben. Eso es la fuente (`CertificateStore`, en `services/store.py`):
+Un validador real no confía en lo que el PDF dice de sí mismo: necesita sus propias **anclas de confianza**, y le conviene tener a mano los **intermedios** de las PKIs que valida, porque muchos firmadores no los embeben. Eso es la fuente: el caso de uso `CertificateSource` (`application/use_cases/certificate_source.py`), con sus reglas en `domain/source.py` y guardada en SQLite (`adapters/outbound/sqlite/certificate_repository.py`). La arquitectura y las reglas F-01 a F-06 están en [docs/arquitectura](arquitectura/dominio.md#fuente-de-certificados-domainsourcepy):
 
 - Una tabla SQLite (`certificates`) con raíces e intermedios: el DER, su SHA-256 (único), el tipo, si está habilitado, si es confiable (sólo raíces), de dónde salió (`seed`, `manual` o `pdf`), notas y fechas. Sólo admite CAs.
 - Al arrancar se abre (y la primera vez se crea con la carga inicial) y se carga en memoria. Cada alta, baja o modificación la vuelve a cargar.
@@ -568,7 +568,7 @@ Un validador real no confía en lo que el PDF dice de sí mismo: necesita sus pr
 
 #### La base SQLite
 
-Es un solo archivo, `certs.db`, en `$CERT_STORE_DB` (por defecto junto a la carpeta de la PKI: `./certs.db` en local, `/data/certs.db` en Docker). Lo crea la app al arrancar si no existe, con el esquema de `services/store.py`. Tiene dos tablas.
+Es un solo archivo, `certs.db`, en `$CERT_STORE_DB` (por defecto junto a la carpeta de la PKI: `./certs.db` en local, `/data/certs.db` en Docker). Lo crea la app al arrancar si no existe, con el esquema de `adapters/outbound/sqlite/certificate_repository.py`. Tiene dos tablas.
 
 **`certificates`**: una fila por raíz o intermedio.
 

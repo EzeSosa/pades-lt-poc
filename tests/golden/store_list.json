@@ -20,7 +20,7 @@
         "issuer": "CN=AC Raíz de la República Argentina,O=Infraestructura de Firma Digital de la República Argentina,C=AR",
         "not_before": "<time>",
         "not_after": "<time>",
-        "validity_status": "valid",
+        "validity_status": "<seed-validity>",
         "created_at": "<time>",
         "updated_at": "<time>",
         "der_b64": "<der:seed-ac-raiz-argentina-2016>"
@@ -37,7 +37,7 @@
         "issuer": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
         "not_before": "<time>",
         "not_after": "<time>",
-        "validity_status": "valid",
+        "validity_status": "<seed-validity>",
         "created_at": "<time>",
         "updated_at": "<time>",
         "der_b64": "<der:seed-ac-raiz-argentina-2007>"
@@ -54,7 +54,7 @@
         "issuer": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
         "not_before": "<time>",
         "not_after": "<time>",
-        "validity_status": "valid",
+        "validity_status": "<seed-validity>",
         "created_at": "<time>",
         "updated_at": "<time>",
         "der_b64": "<der:seed-ac-onti-firma-digital>"

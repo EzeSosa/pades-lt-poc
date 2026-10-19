@@ -39,20 +39,24 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from . import bootstrap
+from .application.ports import Clock
 from .config import Settings
 from .routers import certificates, ocsp, signing, store, tsa, ui, verification
 from .routers import pki as pki_router
 from .domain.errors import UnprocessableInput
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """La app con `settings`, o con la configuración del entorno si no se pasa."""
+def create_app(settings: Settings | None = None, clock: Clock | None = None) -> FastAPI:
+    """La app con `settings`, o con la configuración del entorno si no se pasa.
+
+    `clock` es el reloj del sistema salvo que se pase otro (los tests).
+    """
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # La PKI se genera y la fuente se abre (la primera vez, con su carga inicial) al arrancar.
-        services = bootstrap.build(settings)
+        services = bootstrap.build(settings, clock)
         app.state.services = services
         yield
         services.close()

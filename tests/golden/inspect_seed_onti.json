@@ -71,7 +71,7 @@
         "validity": {
           "not_before": "<time>",
           "not_after": "<time>",
-          "status": "valid",
+          "status": "<seed-validity>",
           "days_left": "<days>"
         },
         "signature_algorithm": "sha1WithRSAEncryption",

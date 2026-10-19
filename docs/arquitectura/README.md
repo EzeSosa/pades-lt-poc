@@ -5,6 +5,8 @@ Este documento describe cómo está organizado el código, qué puede depender d
 | Documento | Contenido |
 |-----------|-----------|
 | [dominio.md](dominio.md) | Lenguaje ubicuo, modelos, reglas y errores del dominio |
+| [invariantes.md](invariantes.md) | Catálogo de reglas de negocio con id, motivo, dónde se aplican y qué test las cubre |
+| [casos-de-uso.md](casos-de-uso.md) | Cada caso de uso: operaciones, errores, secuencias y presentación HTTP |
 | [puertos.md](puertos.md) | El contrato de cada puerto de salida |
 | [adaptadores.md](adaptadores.md) | Cada adaptador: con qué biblioteca y qué resuelve |
 | [ADRs](../adr/README.md) | Las decisiones de arquitectura, con su contexto |
@@ -16,7 +18,7 @@ Este documento describe cómo está organizado el código, qué puede depender d
 > | 0 | Red de seguridad: tests de contrato, suite de PDFs, reglas de dependencias | Hecho |
 > | 1 | Configuración y raíz de composición | Hecho |
 > | 2 | Modelo de dominio base y `CertificateCodec` | Hecho |
-> | 3 | Fuente de certificados | Pendiente |
+> | 3 | Fuente de certificados | Hecho |
 > | 4 | Certificados (extracción e inspección) | Pendiente |
 > | 5 | Validación | Pendiente |
 > | 6 | Firma | Pendiente |
@@ -29,18 +31,24 @@ Este documento describe cómo está organizado el código, qué puede depender d
 src/pades_lt_poc/
 ├── domain/         Python puro: modelos, reglas y errores (dominio.md)
 │   ├── certificates.py   Certificate (sobre el DER), ValidityStatus, CaKind
+│   ├── source.py         la fuente de certificados: entradas, TrustSnapshot, reglas F-01 a F-06
 │   └── errors.py         errores de negocio
 ├── application/      depende sólo del dominio
-│   └── ports.py          los puertos de salida (puertos.md)
-├── adapters/
-│   └── outbound/crypto/codec.py   CertificateCodec con cryptography (adaptadores.md)
+│   ├── ports.py          los puertos de salida (puertos.md)
+│   └── use_cases/
+│       └── certificate_source.py   CertificateSource: ABM, carga inicial y snapshot (casos-de-uso.md)
+├── adapters/outbound/  implementaciones de los puertos (adaptadores.md)
+│   ├── crypto/codec.py              CertificateCodec con cryptography
+│   ├── sqlite/certificate_repository.py   CertificateRepository en SQLite
+│   ├── seed_catalog.py              SeedCatalog con los archivos de seed/
+│   └── clock.py                     Clock con el reloj del sistema
 ├── config.py       Settings: la configuración, leída una vez del entorno
-├── bootstrap.py    raíz de composición: build(settings) -> Services
-├── app.py          create_app(settings): FastAPI, lifespan, routers y manejo de errores
+├── bootstrap.py    raíz de composición: build(settings, clock) -> Services
+├── app.py          create_app(settings, clock): FastAPI, lifespan, routers y manejo de errores
 ├── dependencies.py inyecta en los endpoints los servicios de app.state.services
 ├── pki.py          MiniPki: la PKI de prueba de una carpeta y una URL base
 ├── routers/        endpoints HTTP
-└── services/       la lógica de cada operación, todavía con las bibliotecas adentro
+└── services/       lo que falta migrar: firma, verificación, extracción e inspección de certificados, TSA
 ```
 
 Flujo de arranque:
@@ -51,13 +59,15 @@ create_app(settings)                       importar app.py no lee nada ni crea n
          └── bootstrap.build(settings) ──► Services
                ├── MiniPki(settings.pki_dir, settings.public_base_url).ensure()
                ├── crl_index.install()            (global de pyhanko-certvalidator, una vez)
-               ├── CertificateStore(settings.cert_store_db, CryptographyCertificateCodec())
+               ├── SqliteCertificateRepository(settings.cert_store_db, codec)
+               ├── CertificateSource(repositorio, codec, PackagedSeedCatalog(), clock).initialize()
+               │                                  (carga inicial la primera vez, y el snapshot)
                ├── CrlCache()                     (uno por app)
                ├── load_tsa(pki), PdfSigner.from_pki(pki)
-               ├── SignatureVerifier(store, [raíz de la PoC], fetchers con el CrlCache)
-               └── CertificateExtractor(store), CertificateInspector(store)
+               ├── SignatureVerifier(source, [raíz de la PoC], fetchers con el CrlCache)
+               └── CertificateExtractor(source), CertificateInspector(source)
          app.state.services = Services          lo leen las dependencias de dependencies.py
-         ... al cerrar: services.close()        (cierra la conexión SQLite)
+         ... al cerrar: services.close()        (cierra la conexión SQLite del repositorio)
 ```
 
 ## Configuración (`config.py`)
@@ -76,7 +86,7 @@ Una variable vacía cuenta como no definida.
 
 ## Raíz de composición (`bootstrap.py`)
 
-`build(settings)` es el **único** lugar que crea servicios y decide qué implementación recibe cada uno. Devuelve un `Services` (dataclass inmutable) con todo lo creado; la app lo guarda en `app.state.services` y los endpoints lo reciben por `dependencies.py`. `Services.close()` libera lo que haya que liberar (hoy, la conexión SQLite).
+`build(settings, clock=None)` es el **único** lugar que crea servicios y decide qué implementación recibe cada uno. Devuelve un `Services` (dataclass inmutable) con todo lo creado; la app lo guarda en `app.state.services` y los endpoints lo reciben por `dependencies.py`. `Services.close()` libera lo que haya que liberar (hoy, la conexión SQLite). `clock` es el reloj del sistema (`SystemClock`) salvo que se pase otro: los tests pasan uno que se puede fijar.
 
 Lo que antes era estado global del proceso ahora se crea o se instala acá:
 
@@ -97,10 +107,13 @@ El `Dockerfile` usa la misma forma (`CMD ["uvicorn", "--factory", "pades_lt_poc.
 
 ### En los tests
 
-`tests/conftest.py` arma un `Settings` con una carpeta temporal y un puerto libre, crea la app con `create_app(SETTINGS)` y expone:
+`tests/conftest.py` arma un `Settings` con una carpeta temporal y un puerto libre, crea la app con `create_app(SETTINGS, CLOCK)` y expone:
 
 - `pki`: una `MiniPki` sobre la misma carpeta y URL que la de la app, para leer certificados y claves, revocar y armar CRLs y respuestas OCSP. Los tests la importan con `from conftest import pki`.
-- La fixture `services`: los `Services` de la app (`services.store`, `services.verifier`, `services.crl_cache`, ...).
+- La fixture `services`: los `Services` de la app (`services.source`, `services.verifier`, `services.crl_cache`, ...).
+- La fixture `clock`: el reloj de la app (`TestClock`). Da la hora real, salvo dentro de `with clock.frozen_at(momento):`.
+
+Los fakes de los puertos (repositorio en memoria, reloj fijo, catálogo estático) están en `tests/fakes.py`, para probar casos de uso sin la app.
 
 ## Reglas de dependencias
 

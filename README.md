@@ -110,13 +110,13 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición) y **paso 2** (modelo de dominio base y codec de certificados). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados) y **paso 3** (fuente de certificados). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
-├── domain/           Python puro: el certificado de dominio y los errores de negocio
-├── application/      los puertos (Protocols) que necesitan los casos de uso
-├── adapters/         implementaciones de los puertos (hoy, el codec de certificados con cryptography)
+├── domain/           Python puro: el certificado, la fuente de certificados y sus reglas, los errores de negocio
+├── application/      los puertos (Protocols) y los casos de uso (hoy, CertificateSource: la fuente, /store)
+├── adapters/         implementaciones de los puertos: codec (cryptography), fuente (SQLite), carga inicial, reloj
 ├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
 ├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
 ├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
@@ -134,7 +134,6 @@ src/pades_lt_poc/
 │   ├── crl_index.py      búsqueda de seriales en CRLs grandes con un índice (cryptography)
 │   ├── certificates.py   CertificateExtractor (/certificates) + armado de cadenas y descarga AIA
 │   ├── inspection.py     CertificateInspector (/certificates/inspect): detalle legible de un certificado
-│   ├── store.py          CertificateStore     (/store): la fuente de certificados en SQLite
 │   └── timestamping.py   motor de la TSA      (/tsa)
 ├── seed/             la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
 └── static/           la UI: una página y un script por pantalla, ui.css, ui.js y un JS por tab (servidos en /ui/static)

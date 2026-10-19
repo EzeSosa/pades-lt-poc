@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
 from conftest import pki
-from pades_lt_poc.services.store import SEED_DIR
+from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
 
 Enc = serialization.Encoding
 

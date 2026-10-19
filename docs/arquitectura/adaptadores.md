@@ -4,7 +4,7 @@ Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`ada
 
 Un adaptador de salida no conoce HTTP, ni la raíz de composición, ni el código que todavía no se migró (`services/`, `pki.py`). Lo verifica el contrato "Los adaptadores de salida no conocen HTTP, la composición ni el código sin migrar" de import-linter.
 
-> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2).
+> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2) y los de la fuente de certificados (paso 3).
 
 ## `adapters/outbound/crypto/codec.py`: certificados con `cryptography`
 
@@ -39,3 +39,23 @@ Mientras se migran la extracción de cadenas y la inspección (paso 4), el módu
 Cuando esos servicios pasen a casos de uso, estas funciones quedan como detalle interno del adaptador.
 
 Tests: `tests/test_codec.py`.
+
+## `adapters/outbound/sqlite/certificate_repository.py`: la fuente en SQLite
+
+Implementa [`CertificateRepository`](puertos.md#certificaterepository) con `SqliteCertificateRepository(path, codec)`. El esquema (tablas `certificates` y `meta`, columnas y restricciones) y cómo consultarlo a mano están en [pades.md](../pades.md#la-base-sqlite).
+
+- **Una conexión compartida** (`check_same_thread=False`), serializada con un `RLock`: FastAPI atiende los endpoints sincrónicos en varios hilos, y SQLite no admite escrituras concurrentes en una misma conexión.
+- **Transacciones**: cada escritura va dentro de `with self._db` (commit al salir, rollback si hay una excepción). `apply_initial_load` inserta la carga y escribe la marca `seeded_at` en la misma transacción.
+- **Columnas redundantes**: `subject`, `issuer`, `not_before` y `not_after` se guardan para poder consultar la base con `sqlite3` sin parsear el DER. Al leer, el `Certificate` se reconstruye desde el DER con el `CertificateCodec`, así que las columnas no pueden desincronizarse del modelo.
+- **Restricciones**: `sha256` único, `kind` y `origin` dentro de sus valores, y `CHECK (kind = 'root' OR trusted = 0)`: segunda línea de defensa de F-02.
+- **Horas**: `created_at`, `updated_at` y `seeded_at` se guardan en ISO 8601 al segundo (`2026-10-18T12:00:00+00:00`).
+
+## `adapters/outbound/seed_catalog.py`: la carga inicial empaquetada
+
+Implementa [`SeedCatalog`](puertos.md#seedcatalog) con `PackagedSeedCatalog`: lee los archivos DER de `src/pades_lt_poc/seed/` (`SEED_DIR`) según el diccionario `SEEDS` (archivo → nota). Hoy son la AC Raíz de Argentina 2007 y 2016 y la AC ONTI.
+
+Para cambiar la carga inicial: agregar el `.der` a `seed/` y su entrada a `SEEDS`. Sólo afecta a las bases nuevas (F-04); en una existente, **Restaurar carga inicial** (`POST /store/certificates/seed`) agrega lo que falte.
+
+## `adapters/outbound/clock.py`: el reloj del sistema
+
+Implementa [`Clock`](puertos.md#clock) con `SystemClock`: `datetime.now(UTC)`.

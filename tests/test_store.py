@@ -1,8 +1,7 @@
 """Tests de la fuente de certificados (/store) y de cómo la usan /verify y /certificates."""
 
 import base64
-import sqlite3
-from contextlib import closing
+from datetime import UTC, datetime
 from io import BytesIO
 
 import pytest
@@ -16,11 +15,8 @@ from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import DocumentSecurityStore
 
 from conftest import load_signer, pki, sign
-from pades_lt_poc.adapters.outbound.crypto.codec import CryptographyCertificateCodec
-from pades_lt_poc.services import store as store_module
-from pades_lt_poc.services.store import SEED_DIR, SEEDS, CertificateStore
+from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
 
-CODEC = CryptographyCertificateCodec()
 Enc = serialization.Encoding
 
 
@@ -28,10 +24,10 @@ Enc = serialization.Encoding
 def reset_store(services):
     """El cliente es de sesión: cada test deja la fuente como la carga inicial."""
     yield
-    store = services.store
-    for cert in store.list():
-        store.delete(cert["id"])
-    store.restore_seed()
+    source = services.source
+    for entry in source.list():
+        source.delete(entry.id)
+    source.restore_seed()
 
 
 def pem(name: str) -> str:
@@ -64,56 +60,6 @@ def test_seed(client):
     assert onti["trusted"] is False
     assert "CN=Autoridad Certificante de Firma Digital" in onti["subject"]
     assert base64.b64decode(onti["der_b64"]) == (SEED_DIR / "ac-onti-firma-digital.der").read_bytes()
-
-
-def test_seed_runs_once_and_deletions_stick(tmp_path):
-    path = tmp_path / "certs.db"
-    store = CertificateStore(path, CODEC)
-    assert len(store.list()) == len(SEEDS)
-    store.delete(store.list()[0]["id"])
-    store.close()
-
-    reopened = CertificateStore(path, CODEC)  # como al reiniciar la app
-    assert len(reopened.list()) == len(SEEDS) - 1
-    assert len(reopened.restore_seed()) == 1  # restaurar vuelve a agregar sólo lo que falta
-    assert len(reopened.list()) == len(SEEDS)
-    reopened.close()
-
-
-def test_new_store_loads_once(tmp_path, monkeypatch):
-    reloads = []
-    reload = CertificateStore._reload
-    monkeypatch.setattr(CertificateStore, "_reload", lambda self: (reloads.append(1), reload(self))[1])
-    store = CertificateStore(tmp_path / "certs.db", CODEC)
-    assert len(reloads) == 1
-    assert len(store.snapshot().sha256) == len(SEEDS)
-    store.close()
-
-
-def test_failed_seed_leaves_neither_certs_nor_mark(tmp_path, monkeypatch):
-    """La carga inicial y la marca seeded_at van juntas: si algo falla, el próximo arranque la aplica entera."""
-    path = tmp_path / "certs.db"
-    # _now() se pide una vez por certificado y una más para la marca: la que falla es la de la marca.
-    calls = []
-    now = store_module._now
-
-    def dies_before_marking():
-        calls.append(1)
-        if len(calls) > len(SEEDS):
-            raise RuntimeError("el proceso murió antes de marcar la carga inicial")
-        return now()
-
-    monkeypatch.setattr(store_module, "_now", dies_before_marking)
-    with pytest.raises(RuntimeError):
-        CertificateStore(path, CODEC)
-    with closing(sqlite3.connect(path)) as db:
-        assert db.execute("SELECT COUNT(*) FROM certificates").fetchone() == (0,)
-        assert db.execute("SELECT COUNT(*) FROM meta").fetchone() == (0,)
-
-    monkeypatch.undo()
-    store = CertificateStore(path, CODEC)
-    assert len(store.list()) == len(SEEDS)
-    store.close()
 
 
 def test_restore_seed_endpoint(client):
@@ -190,6 +136,17 @@ def test_only_roots_can_be_trusted(client):
     r = client.patch(f"/store/certificates/{onti['id']}", json={"trusted": True})
     assert r.status_code == 422
     assert r.json()["detail"] == "Sólo una raíz puede ser ancla de confianza"
+
+
+def test_validity_status_uses_the_app_clock(client, clock):
+    """La vigencia de cada certificado se calcula con el reloj de la app (el puerto `Clock`)."""
+    onti = by_subject(client, "Autoridad Certificante de Firma Digital")
+    with clock.frozen_at(datetime(2027, 1, 1, tzinfo=UTC)):
+        assert client.get(f"/store/certificates/{onti['id']}").json()["validity_status"] == "valid"
+    with clock.frozen_at(datetime(2030, 1, 1, tzinfo=UTC)):  # la AC ONTI vence en 2027
+        assert client.get(f"/store/certificates/{onti['id']}").json()["validity_status"] == "expired"
+    with clock.frozen_at(datetime(2000, 1, 1, tzinfo=UTC)):
+        assert client.get(f"/store/certificates/{onti['id']}").json()["validity_status"] == "not_yet_valid"
 
 
 def test_delete_and_not_found(client):

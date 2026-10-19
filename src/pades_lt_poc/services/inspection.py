@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, r
 from ..adapters.outbound.crypto.codec import is_ca, issued_by, load_certs
 
 if TYPE_CHECKING:
-    from .store import CertificateStore
+    from ..application.use_cases.certificate_source import CertificateSource
 
 
 class CertificateInspector:
@@ -23,13 +23,13 @@ class CertificateInspector:
     Con la fuente de certificados, cada certificado indica además si ya está en ella (`in_store`).
     """
 
-    def __init__(self, store: CertificateStore | None = None) -> None:
-        self.store = store
+    def __init__(self, source: CertificateSource | None = None) -> None:
+        self.source = source
 
     def inspect(self, data: bytes) -> dict:
         certs = load_certs(data)
         now = datetime.now(UTC)
-        in_store = self.store.snapshot().sha256 if self.store else frozenset()
+        in_store = self.source.snapshot().known_sha256 if self.source else frozenset()
         out = [_inspect(c, now) for c in certs]
         for cert in out:
             cert["in_store"] = cert["fingerprints"]["sha256"] in in_store

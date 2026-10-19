@@ -92,4 +92,5 @@ Antes de mover código se agregan tres tipos de test, que deben pasar sin cambio
 **Queda pendiente:**
 
 - Los goldens de la fuente incluyen `validity_status` de los certificados de la carga inicial, que es `valid` hasta el 2027-11-17 (vencimiento de la AC Raíz 2007 y de la AC ONTI). El puerto `Clock` del paso de la fuente permite fijar la hora en esos tests; hasta entonces, si vencen, los goldens se regeneran.
+  *Corrección (2026-10-18, paso 3):* fijar la hora no sirve en los tests de contrato, porque la PKI de prueba se genera con la hora real y en una hora fija anterior sus certificados figuran como no vigentes. Se resolvió normalizando sólo la vigencia de los certificados de la carga inicial (`<seed-validity>`); que la vigencia sale del `Clock` lo prueba `tests/test_store.py::test_validity_status_uses_the_app_clock`.
 - Cada paso de la migración documenta en `docs/arquitectura/` su parte: dominio, invariantes, casos de uso, puertos y adaptadores.

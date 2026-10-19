@@ -21,7 +21,8 @@ from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowW
 
 from ..domain.errors import UnprocessableInput
 from . import read_signed_pdf
-from .store import CertificateStore, StoreSnapshot
+from ..application.use_cases.certificate_source import CertificateSource
+from ..domain.source import TrustSnapshot
 from .trust_problems import diagnose
 
 ValidationTime = Literal["now", "claimed_signing_time"]
@@ -123,22 +124,22 @@ class SignatureVerifier:
 
     def __init__(
         self,
-        store: CertificateStore,
+        source: CertificateSource,
         own_roots: list[asn1_x509.Certificate],
         fetcher_backend: Callable[[], FetcherBackend],
     ) -> None:
-        self.store = store
+        self.source = source
         self.own_roots = own_roots
         self.fetcher_backend = fetcher_backend
 
-    def trust_roots(self, snapshot: StoreSnapshot | None = None) -> list[asn1_x509.Certificate]:
+    def trust_roots(self, snapshot: TrustSnapshot | None = None) -> list[asn1_x509.Certificate]:
         """La raíz de la PoC y las raíces confiables habilitadas de la fuente.
 
         `verify` pasa el snapshot que ya tomó, para que raíces e intermedios salgan del mismo
         estado de la fuente aunque el ABM cambie en el medio.
         """
-        snapshot = snapshot or self.store.snapshot()
-        return [*self.own_roots, *snapshot.trusted_roots]
+        snapshot = snapshot or self.source.snapshot()
+        return [*self.own_roots, *_asn1(snapshot.trusted_roots)]
 
     def algorithm_policy(self, roots: list[asn1_x509.Certificate] | None = None) -> LegacyRootsPolicy:
         """SHA-1 sólo para lo que firman las raíces confiables que nacieron con SHA-1."""
@@ -161,14 +162,14 @@ class SignatureVerifier:
         has_dss = "/DSS" in reader.root
         dss_store = DocumentSecurityStore.read_dss(reader) if has_dss else None
         now = datetime.now(UTC)
-        snapshot = self.store.snapshot()
+        snapshot = self.source.snapshot()
         roots = self.trust_roots(snapshot)
-        sources = _Sources(_embedded_certs(reader, dss_store), snapshot.sha256)
+        sources = _Sources(_embedded_certs(reader, dss_store), snapshot.known_sha256)
 
         async with AsyncExitStack() as stack:
             # Un solo juego de fetchers para todo el PDF: lo descargado para una firma sirve a las demás.
             fetchers = await stack.enter_async_context(self.fetcher_backend()) if online else None
-            context = _ContextFactory(dss_store, roots, list(snapshot.intermediates), self.algorithm_policy(roots), fetchers)
+            context = _ContextFactory(dss_store, roots, _asn1(snapshot.intermediates), self.algorithm_policy(roots), fetchers)
             results = []
             for sig in reader.embedded_signatures:
                 if sig.sig_object.get("/Type") == "/DocTimeStamp":
@@ -243,6 +244,11 @@ class _ContextFactory:
         # Sin DSS no hay revocación: listas vacías para que la firma resulte no confiable
         # (pyHanko lanza ValueError si en hard-fail sin fetching no recibe ninguna).
         return ValidationContext(**kwargs, crls=[], ocsps=[])
+
+
+def _asn1(certs) -> list[asn1_x509.Certificate]:
+    """Certificados de dominio como los recibe pyHanko."""
+    return [asn1_x509.Certificate.load(c.der) for c in certs]
 
 
 def _embedded_certs(reader: PdfFileReader, dss_store: DocumentSecurityStore | None) -> set[bytes]:

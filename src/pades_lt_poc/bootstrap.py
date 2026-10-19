@@ -15,7 +15,12 @@ from dataclasses import dataclass
 from pyhanko.keys import load_cert_from_pemder
 from pyhanko.sign.timestamps import DummyTimeStamper
 
+from .adapters.outbound.clock import SystemClock
 from .adapters.outbound.crypto.codec import CryptographyCertificateCodec
+from .adapters.outbound.seed_catalog import PackagedSeedCatalog
+from .adapters.outbound.sqlite.certificate_repository import SqliteCertificateRepository
+from .application.ports import Clock
+from .application.use_cases.certificate_source import CertificateSource
 from .config import Settings
 from .pki import MiniPki
 from .services import crl_index
@@ -23,7 +28,6 @@ from .services.certificates import CertificateExtractor
 from .services.fetching import CrlCache, RevocationFetcherBackend
 from .services.inspection import CertificateInspector
 from .services.signing import PdfSigner
-from .services.store import CertificateStore
 from .services.timestamping import load_tsa
 from .services.verification import SignatureVerifier
 
@@ -34,18 +38,24 @@ class Services:
     pki: MiniPki
     tsa_engine: DummyTimeStamper
     signer: PdfSigner
-    store: CertificateStore
+    clock: Clock
+    repository: SqliteCertificateRepository
+    source: CertificateSource
     crl_cache: CrlCache
     verifier: SignatureVerifier
     certificate_extractor: CertificateExtractor
     certificate_inspector: CertificateInspector
 
     def close(self) -> None:
-        self.store.close()
+        self.repository.close()
 
 
-def build(settings: Settings) -> Services:
-    """Crea la PKI si no existe, abre la fuente (con su carga inicial la primera vez) y arma los servicios."""
+def build(settings: Settings, clock: Clock | None = None) -> Services:
+    """Crea la PKI si no existe, abre la fuente (con su carga inicial la primera vez) y arma los servicios.
+
+    `clock` es el reloj del sistema salvo que se pase otro (los tests).
+    """
+    clock = clock or SystemClock()
     pki = MiniPki(settings.pki_dir, settings.public_base_url)
     pki.ensure()
 
@@ -54,7 +64,11 @@ def build(settings: Settings) -> Services:
     # Es global al proceso (pyHanko no la recibe por parámetro) y vale con y sin conexión.
     crl_index.install()
 
-    store = CertificateStore(settings.cert_store_db, CryptographyCertificateCodec())
+    codec = CryptographyCertificateCodec()
+    repository = SqliteCertificateRepository(settings.cert_store_db, codec)
+    # La fuente de certificados: la primera vez que se crea la base, con su carga inicial.
+    source = CertificateSource(repository, codec, PackagedSeedCatalog(), clock)
+    source.initialize()
     # Las CRL descargadas se guardan entre verificaciones hasta su nextUpdate.
     crl_cache = CrlCache()
     poc_root = load_cert_from_pemder(str(pki.entity(pki.ROOT).cert_path))
@@ -63,9 +77,11 @@ def build(settings: Settings) -> Services:
         pki=pki,
         tsa_engine=load_tsa(pki),
         signer=PdfSigner.from_pki(pki),
-        store=store,
+        clock=clock,
+        repository=repository,
+        source=source,
         crl_cache=crl_cache,
-        verifier=SignatureVerifier(store, [poc_root], lambda: RevocationFetcherBackend(crl_cache=crl_cache)),
-        certificate_extractor=CertificateExtractor(store),
-        certificate_inspector=CertificateInspector(store),
+        verifier=SignatureVerifier(source, [poc_root], lambda: RevocationFetcherBackend(crl_cache=crl_cache)),
+        certificate_extractor=CertificateExtractor(source),
+        certificate_inspector=CertificateInspector(source),
     )
