@@ -20,7 +20,7 @@ Este documento describe cómo está organizado el código, qué puede depender d
 > | 2 | Modelo de dominio base y `CertificateCodec` | Hecho |
 > | 3 | Fuente de certificados | Hecho |
 > | 4 | Certificados (extracción e inspección) | Hecho |
-> | 5 | Validación | Pendiente |
+> | 5 | Validación | Hecho |
 > | 6 | Firma | Pendiente |
 > | 7 | Testbed (PKI, OCSP, TSA) fuera del núcleo | Pendiente |
 > | 8 | Limpieza | Pendiente |
@@ -33,6 +33,7 @@ src/pades_lt_poc/
 │   ├── certificates.py   Certificate (sobre el DER), ValidityStatus, CaKind, CertificateDetails
 │   ├── signatures.py     las firmas de un PDF: SignedDocument, CmsSignature, Integrity, TimestampToken
 │   ├── chains.py         armado de cadenas sin exigir confianza: reglas C-01 a C-03
+│   ├── verification.py   validación: opciones, anclas, motivo de desconfianza, nivel PAdES (V-01 a V-10)
 │   ├── source.py         la fuente de certificados: entradas, TrustSnapshot, reglas F-01 a F-06
 │   └── errors.py         errores de negocio
 ├── application/      depende sólo del dominio
@@ -40,10 +41,12 @@ src/pades_lt_poc/
 │   └── use_cases/
 │       ├── certificate_source.py     CertificateSource: ABM, carga inicial y snapshot (casos-de-uso.md)
 │       ├── certificate_chains.py     ExtractCertificateChains: la cadena de cada firma (/certificates)
-│       └── inspect_certificates.py   InspectCertificates: detalle legible (/certificates/inspect)
+│       ├── inspect_certificates.py   InspectCertificates: detalle legible (/certificates/inspect)
+│       └── verify_signatures.py      VerifySignatures: validación de las firmas (/verify)
 ├── adapters/outbound/  implementaciones de los puertos (adaptadores.md)
 │   ├── crypto/codec.py, details.py  CertificateCodec con cryptography (parseo, emisor, detalle legible)
-│   ├── pyhanko/signed_pdf_reader.py SignedPdfReader con pyHanko
+│   ├── pyhanko/                     SignatureValidator y SignedPdfReader con pyHanko: validator, policies,
+│   │                                trust_paths, fetching (CRL/OCSP/AIA), crl_index, signed_pdf_reader
 │   ├── http/issuer_fetcher.py       IssuerFetcher (AIA) con requests
 │   ├── sqlite/certificate_repository.py   CertificateRepository en SQLite
 │   ├── seed_catalog.py              SeedCatalog con los archivos de seed/
@@ -54,7 +57,7 @@ src/pades_lt_poc/
 ├── dependencies.py inyecta en los endpoints los servicios de app.state.services
 ├── pki.py          MiniPki: la PKI de prueba de una carpeta y una URL base
 ├── routers/        endpoints HTTP
-└── services/       lo que falta migrar: firma, verificación (con su descarga de revocación) y TSA
+└── services/       lo que falta migrar: la firma y la TSA
 ```
 
 Flujo de arranque:
@@ -64,13 +67,14 @@ create_app(settings)                       importar app.py no lee nada ni crea n
    └── lifespan (al arrancar uvicorn o el TestClient)
          └── bootstrap.build(settings) ──► Services
                ├── MiniPki(settings.pki_dir, settings.public_base_url).ensure()
-               ├── crl_index.install()            (global de pyhanko-certvalidator, una vez)
+               ├── crl_index.install()            (adapters/outbound/pyhanko: global de pyhanko-certvalidator, una vez)
                ├── SqliteCertificateRepository(settings.cert_store_db, codec)
                ├── CertificateSource(repositorio, codec, PackagedSeedCatalog(), clock).initialize()
                │                                  (carga inicial la primera vez, y el snapshot)
                ├── CrlCache()                     (uno por app)
                ├── load_tsa(pki), PdfSigner.from_pki(pki)
-               ├── SignatureVerifier(source, [raíz de la PoC], fetchers con el CrlCache)
+               ├── VerifySignatures(PyHankoSignatureValidator(codec, fetchers con el CrlCache),
+               │                    source, [raíz de la PoC], clock)
                ├── ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher)
                └── InspectCertificates(codec, source)
          app.state.services = Services          lo leen las dependencias de dependencies.py
@@ -97,7 +101,7 @@ Una variable vacía cuenta como no definida.
 
 Lo que antes era estado global del proceso ahora se crea o se instala acá:
 
-- **Índice de CRLs** (`services/crl_index.install()`): reemplaza una función de pyhanko-certvalidator, que no la recibe por parámetro, así que sigue siendo global al proceso. Se instala en `build`, no como efecto lateral de crear el verificador. Llamarla más de una vez no tiene efecto adicional.
+- **Índice de CRLs** (`adapters/outbound/pyhanko/crl_index.install()`): reemplaza una función de pyhanko-certvalidator, que no la recibe por parámetro, así que sigue siendo global al proceso. Se instala en `build`, no como efecto lateral de crear el validador. Llamarla más de una vez no tiene efecto adicional.
 - **Caché de CRLs** (`CrlCache`): era un singleton del módulo `fetching` (`CRL_CACHE`). Ahora hay uno por app, que se pasa al `RevocationFetcherBackend` de cada verificación con conexión. Los tests lo vacían con `services.crl_cache.clear()`.
 - **La PKI de prueba** (`MiniPki`): antes eran funciones de módulo que leían `PKI_DIR` y `BASE_URL`; ahora es un objeto con su carpeta y su URL, y los servicios que la usan la reciben (`PdfSigner.from_pki(pki)`, `load_tsa(pki)`). El verificador ya no la conoce: recibe la raíz de la PoC como una lista de anclas implícitas.
 
@@ -117,7 +121,7 @@ El `Dockerfile` usa la misma forma (`CMD ["uvicorn", "--factory", "pades_lt_poc.
 `tests/conftest.py` arma un `Settings` con una carpeta temporal y un puerto libre, crea la app con `create_app(SETTINGS, clock=CLOCK, issuer_fetcher=HttpIssuerFetcher(get=AIA))` y expone:
 
 - `pki`: una `MiniPki` sobre la misma carpeta y URL que la de la app, para leer certificados y claves, revocar y armar CRLs y respuestas OCSP. Los tests la importan con `from conftest import pki`.
-- La fixture `services`: los `Services` de la app (`services.source`, `services.verifier`, `services.crl_cache`, ...).
+- La fixture `services`: los `Services` de la app (`services.source`, `services.verify_signatures`, `services.crl_cache`, ...).
 - La fixture `clock`: el reloj de la app (`TestClock`). Da la hora real, salvo dentro de `with clock.frozen_at(momento):`.
 - La fixture `aia`: lo que "descarga" la app por AIA. Falla siempre (sin red), salvo que el test ponga `aia.route = url -> bytes`.
 

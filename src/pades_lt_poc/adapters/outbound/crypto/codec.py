@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 
+from asn1crypto import x509 as asn1_x509
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -40,8 +41,11 @@ def _x509(cert: Certificate) -> x509.Certificate:
 
 
 def to_domain(cert: x509.Certificate) -> Certificate:
+    der = cert.public_bytes(serialization.Encoding.DER)
+    # Los nombres para mostrar y el hash de la firma, como los da asn1crypto (lo que usa pyHanko).
+    asn1 = asn1_x509.Certificate.load(der)
     return Certificate(
-        der=cert.public_bytes(serialization.Encoding.DER),
+        der=der,
         sha256=cert.fingerprint(hashes.SHA256()).hex(),
         sha1=cert.fingerprint(hashes.SHA1()).hex(),
         subject=cert.subject.rfc4514_string(),
@@ -52,7 +56,17 @@ def to_domain(cert: x509.Certificate) -> Certificate:
         is_ca=is_ca(cert),
         self_signed=issued_by(cert, cert),
         ca_issuer_urls=ca_issuer_urls(cert),
+        display_name=asn1.subject.human_friendly,
+        common_name=asn1.subject.native.get("common_name"),
+        signature_hash_algorithm=_signature_hash(asn1),
     )
+
+
+def _signature_hash(cert: asn1_x509.Certificate) -> str | None:
+    try:
+        return cert["signature_algorithm"].hash_algo
+    except ValueError:  # p. ej. Ed25519, que no tiene un hash separado
+        return None
 
 
 # --------------------------------------------------------------------------- parseo

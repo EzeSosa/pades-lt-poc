@@ -2,13 +2,14 @@
 
 Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, aplica las reglas del [dominio](dominio.md) y usa el exterior sólo a través de [puertos](puertos.md). Están en `application/use_cases/` y no saben de HTTP: los endpoints de `routers/` traducen el pedido, llaman al caso de uso y arman la respuesta (presenters).
 
-> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) y la extracción e inspección de certificados (paso 4). La validación y la firma siguen en `services/` y se agregan en sus pasos.
+> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) la extracción e inspección de certificados (paso 4) y la validación (paso 5). La firma sigue en `services/` y se agrega en su paso.
 
 | Caso de uso | Endpoints | Puertos |
 |-------------|-----------|---------|
 | [`CertificateSource`](#certificatesource-la-fuente-de-certificados) | `/store/certificates*` (y el snapshot que leen `/verify`, `/certificates` y `/certificates/inspect`) | `CertificateRepository`, `CertificateCodec`, `SeedCatalog`, `Clock` |
 | [`ExtractCertificateChains`](#extractcertificatechains-la-cadena-de-cada-firma) | `POST /certificates` | `SignedPdfReader`, `CertificateCodec`, `IssuerFetcher` (y el snapshot de `CertificateSource`) |
 | [`InspectCertificates`](#inspectcertificates-el-detalle-de-un-certificado) | `POST /certificates/inspect` | `CertificateCodec` (y el snapshot de `CertificateSource`) |
+| [`VerifySignatures`](#verifysignatures-validar-las-firmas-de-un-pdf) | `POST /verify` | `SignatureValidator`, `Clock` (y el snapshot de `CertificateSource`) |
 
 ## `CertificateSource`: la fuente de certificados
 
@@ -149,3 +150,67 @@ Tests: `tests/test_extract_chains.py` (con fakes), `tests/test_certificates.py` 
 El router exige uno solo de `crt` (archivo) o `b64` (texto) y arma el JSON con `present_inspected`: los campos del certificado y del detalle, `validity` con `status` y `days_left` calculados con el `Clock` de la app, las huellas y `in_store`.
 
 Tests: `tests/test_inspection.py` (por HTTP), goldens `inspect_*`.
+
+## `VerifySignatures`: validar las firmas de un PDF
+
+`application/use_cases/verify_signatures.py`. Valida cada firma con el material del PDF (CMS y DSS) y la fuente de certificados; con conexión, además con lo que descargue. Las reglas V-01 a V-10 están en [dominio.md](dominio.md#validación-domainverificationpy) e [invariantes.md](invariantes.md#validación-v).
+
+**Async**: con conexión descarga CRL, OCSP y emisores. El router lo llama con `await`.
+
+| Entrada | Salida | Errores (HTTP) |
+|---------|--------|----------------|
+| `pdf` (bytes), `VerificationOptions` | `VerificationReport` | `UnprocessableInput` (422): con conexión y hora declarada (V-04). `UnprocessablePdf` (422): el PDF no tiene firmas (V-10). Valores de opciones desconocidos: 422 de FastAPI. |
+
+`trust_roots(snapshot=None)` devuelve las anclas (V-01). `verify` lo usa con el snapshot que ya tomó, así anclas e intermedios salen del mismo estado de la fuente (F-05).
+
+### Paso a paso
+
+```mermaid
+sequenceDiagram
+    participant R as routers/verification.py
+    participant U as VerifySignatures
+    participant S as CertificateSource
+    participant D as domain/verification.py
+    participant V as SignatureValidator
+    R->>U: verify(pdf, options)
+    U->>D: options.check()  (V-04)
+    U->>S: snapshot()
+    U->>D: trust_anchors, legacy_sha1_roots  (V-01, V-02)
+    U->>V: open(pdf, ValidationPolicy)
+    V-->>U: sesión  (o UnprocessablePdf, V-10)
+    loop cada firma
+        alt DocTimeStamp
+            U->>U: se lista, no se valida
+        else firma
+            opt validation_time = claimed_signing_time
+                U->>V: claimed_signing_time(firma)
+            end
+            U->>D: validation_moment  (V-08)
+            U->>V: evaluate(firma, ValidatedAt)
+            V-->>U: SignatureEvaluation
+            U->>D: trust_problem, completed_from_store  (V-09, V-06; firma y sello)
+        end
+    end
+    U->>V: fetched()  (con conexión)
+    U->>D: pades_level  (V-05, V-07)
+    U-->>R: VerificationReport
+    R->>R: present_report(...)  → JSON
+```
+
+La hora declarada sólo se lee si se pidió validar a esa hora.
+
+### Presentación (HTTP)
+
+`routers/verification.py::present_report` arma el JSON:
+
+| Campo | De dónde sale |
+|-------|---------------|
+| `validation_time`, `diff_policy`, `revocation` | Las opciones, con su nota o advertencia; `revocation.fetched` con lo descargado (CRL: emisor, vigencia, si salió del caché y cuándo se descargó; OCSP: serie en hex, estado y fecha; emisores: nombre y huella). |
+| `pades_level` | `VerificationReport.pades_level`. |
+| `dss` | `{"Certs", "OCSPs", "CRLs"}`, o `null` sin DSS. |
+| `certificate_store` | `trusted_roots` (cantidad de anclas, incluida la implícita), `intermediates`, `self_contained` y `note`. |
+| `signatures` | Por firma: `field`, `type`, `subfilter`, `signer` (nombre para mostrar), `bottom_line`, `intact`, `valid`, `trusted`, `trust_problem`, `coverage`, `completed_from_store`, `modifications`, `validated_at`, `signature_timestamp` y `details`. Un DocTimeStamp sólo lleva `field` y `type`. |
+
+En `trust_problem.paths`, cada eslabón se muestra con su CN (o el nombre completo si no tiene), su vencimiento y su huella: una CA renovada tiene el mismo nombre en los dos caminos.
+
+Tests: `tests/test_verify_signatures.py` (con un validador falso), `tests/test_verify.py`, `tests/test_verify_online.py` y `tests/test_store.py` (por HTTP), goldens `verify_*`.

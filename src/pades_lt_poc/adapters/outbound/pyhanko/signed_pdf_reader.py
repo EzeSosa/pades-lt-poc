@@ -10,7 +10,6 @@ from collections.abc import Callable
 from io import BytesIO
 
 from asn1crypto import cms
-from asn1crypto import x509 as asn1_x509
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.errors import SignatureValidationError
@@ -22,9 +21,9 @@ from pyhanko.sign.validation.generic_cms import (
 )
 
 from ....application.ports import CertificateCodec
-from ....domain.certificates import Certificate
 from ....domain.errors import UnprocessablePdf
 from ....domain.signatures import CmsSignature, EmbeddedSignature, Integrity, SignatureKind, SignedDocument, TimestampToken
+from .convert import CertificateConverter
 
 
 def open_signed_pdf(data: bytes) -> PdfFileReader:
@@ -43,7 +42,7 @@ class PyHankoSignedPdfReader:
 
     def read(self, pdf: bytes) -> SignedDocument:
         reader = open_signed_pdf(pdf)
-        convert = _Converter(self.codec)
+        convert = CertificateConverter(self.codec)
         dss = list(DocumentSecurityStore.read_dss(reader).load_certs()) if "/DSS" in reader.root else []
         signatures = []
         for sig in reader.embedded_signatures:
@@ -67,21 +66,7 @@ class PyHankoSignedPdfReader:
         return SignedDocument(tuple(signatures), tuple(convert(c) for c in dss))
 
 
-class _Converter:
-    """asn1crypto -> `Certificate`, una vez por certificado en cada lectura (el mismo suele estar en el CMS y en el DSS)."""
-
-    def __init__(self, codec: CertificateCodec) -> None:
-        self.codec = codec
-        self._cache: dict[bytes, Certificate] = {}
-
-    def __call__(self, cert: asn1_x509.Certificate) -> Certificate:
-        der = cert.dump()
-        if der not in self._cache:
-            [self._cache[der]] = self.codec.parse(der)
-        return self._cache[der]
-
-
-def _cms(signed_data: cms.SignedData, covered_digest: Callable[[str], bytes], convert: _Converter) -> CmsSignature:
+def _cms(signed_data: cms.SignedData, covered_digest: Callable[[str], bytes], convert: CertificateConverter) -> CmsSignature:
     integrity = check_integrity(signed_data, covered_digest)
     try:
         found = extract_certs_for_validation(signed_data)

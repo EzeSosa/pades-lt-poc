@@ -12,26 +12,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pyhanko.keys import load_cert_from_pemder
 from pyhanko.sign.timestamps import DummyTimeStamper
 
 from .adapters.outbound.clock import SystemClock
 from .adapters.outbound.crypto.codec import CryptographyCertificateCodec
 from .adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
+from .adapters.outbound.pyhanko import crl_index
+from .adapters.outbound.pyhanko.fetching import CrlCache, RevocationFetcherBackend
 from .adapters.outbound.pyhanko.signed_pdf_reader import PyHankoSignedPdfReader
+from .adapters.outbound.pyhanko.validator import PyHankoSignatureValidator
 from .adapters.outbound.seed_catalog import PackagedSeedCatalog
 from .adapters.outbound.sqlite.certificate_repository import SqliteCertificateRepository
 from .application.ports import Clock, IssuerFetcher
 from .application.use_cases.certificate_chains import ExtractCertificateChains
 from .application.use_cases.certificate_source import CertificateSource
 from .application.use_cases.inspect_certificates import InspectCertificates
+from .application.use_cases.verify_signatures import VerifySignatures
 from .config import Settings
 from .pki import MiniPki
-from .services import crl_index
-from .services.fetching import CrlCache, RevocationFetcherBackend
 from .services.signing import PdfSigner
 from .services.timestamping import load_tsa
-from .services.verification import SignatureVerifier
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class Services:
     repository: SqliteCertificateRepository
     source: CertificateSource
     crl_cache: CrlCache
-    verifier: SignatureVerifier
+    verify_signatures: VerifySignatures
     extract_chains: ExtractCertificateChains
     inspect_certificates: InspectCertificates
 
@@ -75,7 +75,8 @@ def build(settings: Settings, *, clock: Clock | None = None, issuer_fetcher: Iss
     source.initialize()
     # Las CRL descargadas se guardan entre verificaciones hasta su nextUpdate.
     crl_cache = CrlCache()
-    poc_root = load_cert_from_pemder(str(pki.entity(pki.ROOT).cert_path))
+    # La raíz de la PoC es ancla implícita: se regenera con la PKI, así que guardada en la fuente quedaría vieja.
+    [poc_root] = codec.parse(pki.entity(pki.ROOT).cert_path.read_bytes())
     return Services(
         settings=settings,
         pki=pki,
@@ -85,7 +86,9 @@ def build(settings: Settings, *, clock: Clock | None = None, issuer_fetcher: Iss
         repository=repository,
         source=source,
         crl_cache=crl_cache,
-        verifier=SignatureVerifier(source, [poc_root], lambda: RevocationFetcherBackend(crl_cache=crl_cache)),
+        verify_signatures=VerifySignatures(
+            PyHankoSignatureValidator(codec, lambda: RevocationFetcherBackend(crl_cache=crl_cache)), source, [poc_root], clock
+        ),
         extract_chains=ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher),
         inspect_certificates=InspectCertificates(codec, source),
     )

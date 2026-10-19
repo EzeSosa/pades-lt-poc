@@ -9,11 +9,8 @@ from pyhanko.pdf_utils.reader import PdfFileReader
 
 from conftest import load_signer, sign
 from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
-from pades_lt_poc.services.verification import (
-    CLAIMED_TIME_WARNING,
-    UNALLOCATED_FREES_NOTE,
-    LegacyRootsPolicy,
-)
+from pades_lt_poc.adapters.outbound.pyhanko.policies import LegacyRootsPolicy
+from pades_lt_poc.domain.verification import CLAIMED_TIME_WARNING, UNALLOCATED_FREES_NOTE, legacy_sha1_roots
 
 AC_RAIZ_2007 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2007.der"))
 AC_RAIZ_2016 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2016.der"))
@@ -27,7 +24,7 @@ def verify(client, pdf: bytes, **data):
 # --------------------------------------------------------------------------- anclas
 def test_verify_trusts_poc_root_and_both_ac_raiz(services):
     """La raíz de la PoC es implícita; las AC Raíz vienen de la carga inicial de la fuente."""
-    roots = [c.dump() for c in services.verifier.trust_roots()]
+    roots = [c.der for c in services.verify_signatures.trust_roots()]
     assert roots[0] == services.signer.trust_root.dump()
     assert AC_RAIZ_2007.dump() in roots
     assert AC_RAIZ_2016.dump() in roots
@@ -36,14 +33,13 @@ def test_verify_trusts_poc_root_and_both_ac_raiz(services):
 
 def test_sha1_exemption_only_for_roots_born_with_sha1(services):
     """La de 2007 firma con SHA-1; la de 2016, con SHA-512, no necesita la excepción."""
-    legacy = services.verifier.algorithm_policy()._legacy_keys
-    assert legacy == {AC_RAIZ_2007.public_key.dump()}
+    legacy = legacy_sha1_roots(services.verify_signatures.trust_roots())
+    assert [c.der for c in legacy] == [AC_RAIZ_2007.dump()]
 
 
 def test_verify_uses_trust_roots(client, services, pdf, monkeypatch):
     """verify() arma las anclas con trust_roots(): lo que prueban los tests de anclas es lo que valida."""
-    verifier = services.verifier
-    monkeypatch.setattr(verifier, "trust_roots", lambda snapshot=None: [])
+    monkeypatch.setattr(services.verify_signatures, "trust_roots", lambda snapshot=None: ())
     [sig] = verify(client, sign(pdf, load_signer())).json()["signatures"]
     assert sig["trust_problem"]["reason"] == "no_path"
 

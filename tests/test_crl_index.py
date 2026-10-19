@@ -8,8 +8,8 @@ from pyhanko.keys import load_cert_from_pemder
 from pyhanko_certvalidator.revinfo import validate_crl
 
 from conftest import pki
-from pades_lt_poc.services import crl_index
-from pades_lt_poc.services.fetching import CrlCache
+from pades_lt_poc.adapters.outbound.pyhanko import crl_index
+from pades_lt_poc.adapters.outbound.pyhanko.fetching import CrlCache
 
 
 @pytest.fixture

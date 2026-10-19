@@ -4,18 +4,19 @@ Los puertos de salida son lo que los casos de uso necesitan del exterior. Están
 
 Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores lanza, si hace E/S y si bloquea. Una implementación nueva tiene que cumplirlo entero, y los tests del adaptador lo verifican.
 
-> Este documento crece con la migración. Hoy tiene `CertificateCodec` (paso 2), los de la fuente de certificados (paso 3) y los de la extracción de cadenas (paso 4).
+> Este documento crece con la migración. Hoy tiene `CertificateCodec` (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) y el de la validación (paso 5).
 
 | Puerto | Implementaciones | Lo usa |
 |--------|------------------|--------|
 | [`CertificateCodec`](#certificatecodec) | `CryptographyCertificateCodec` | `CertificateSource`, `ExtractCertificateChains`, `InspectCertificates`, `SqliteCertificateRepository`, `PyHankoSignedPdfReader` |
 | [`SignedPdfReader`](#signedpdfreader) | `PyHankoSignedPdfReader`; `FakeReader` (tests) | `ExtractCertificateChains` |
 | [`IssuerFetcher`](#issuerfetcher) | `HttpIssuerFetcher`; `FakeFetcher` (tests) | `ExtractCertificateChains` |
+| [`SignatureValidator`](#signaturevalidator) | `PyHankoSignatureValidator`; `FakeValidator` (tests) | `VerifySignatures` |
 | [`CertificateRepository`](#certificaterepository) | `SqliteCertificateRepository`; `InMemoryCertificateRepository` (tests) | `CertificateSource` |
 | [`SeedCatalog`](#seedcatalog) | `PackagedSeedCatalog`; `StaticSeedCatalog` (tests) | `CertificateSource` |
-| [`Clock`](#clock) | `SystemClock`; `FixedClock` y `TestClock` (tests) | `CertificateSource`, `routers/store.py` |
+| [`Clock`](#clock) | `SystemClock`; `FixedClock` y `TestClock` (tests) | `CertificateSource`, `VerifySignatures`, `routers/store.py`, `routers/certificates.py` |
 
-Los fakes de los tests están en `tests/fakes.py` (y `TestClock` en `tests/conftest.py`; `FakeReader` y `FakeFetcher` en `tests/test_extract_chains.py`).
+Los fakes de los tests están en `tests/fakes.py` (y `TestClock` en `tests/conftest.py`; `FakeReader` y `FakeFetcher` en `tests/test_extract_chains.py`; `FakeValidator` en `tests/test_verify_signatures.py`).
 
 ## `CertificateCodec`
 
@@ -84,7 +85,7 @@ La carga inicial de la fuente. `seeds()` devuelve una lista fija de `SeedCertifi
 
 `now()` devuelve la hora actual con zona horaria (UTC). Existe para poder fijar la hora en los tests: la vigencia de un certificado (`validity_status`) y las horas de la fuente (`created_at`, `updated_at`) salen de acá.
 
-La validación y la firma todavía usan la hora del sistema directamente (pyHanko la toma por su cuenta); pasan a este puerto cuando se migren, donde corresponda.
+La validación toma de acá la hora actual (`validated_at` y el `moment` sin conexión); con conexión pyHanko valida a su propia hora actual, porque no admite descargar con una hora fija. La firma todavía usa la hora del sistema (paso 6).
 
 ## `SignedPdfReader`
 
@@ -125,3 +126,26 @@ Descarga los certificados publicados en una URL AIA caIssuers.
 | Lo descargado no es un certificado | `IssuerFetchError("no es un certificado DER, PEM ni PKCS#7")` |
 
 `IssuerFetchError` está en `application/ports.py`: es una señal del adaptador al caso de uso, no un error de negocio. El caso de uso la convierte en un `aia_errors` con la URL (`<url>: <motivo>`).
+
+## `SignatureValidator`
+
+Valida firmas PAdES: integridad, camino hasta un ancla, revocación, sello de tiempo y modificaciones posteriores. Es el puerto que encapsula a pyHanko.
+
+**Propiedades**: async (con conexión descarga CRL, OCSP y emisores). Cada `open` es una sesión independiente; con conexión, las descargas se comparten entre las firmas de la sesión y las conexiones se cierran al salir del `async with`. La revocación es siempre obligatoria (V-03): una firma sin revocación disponible no es confiable.
+
+### `open(pdf, policy) -> async context manager de ValidationSession`
+
+Abre el PDF para validar con la [`ValidationPolicy`](dominio.md#política). Lanza `UnprocessablePdf("El PDF no tiene firmas")` si no tiene ninguna.
+
+### `ValidationSession`
+
+| Miembro | Contrato |
+|---------|----------|
+| `signatures` | Las firmas (`SignatureRef`: `index`, `field_name`, `kind`), en el orden del documento. |
+| `dss` | `DssSummary` (certificados, respuestas OCSP y CRLs del DSS), o `None` sin DSS. |
+| `embedded_sha256` | Huellas de todos los certificados que trae el PDF: DSS, CMS de cada firma y de sus sellos. |
+| `claimed_signing_time(ref)` | La hora que declara la firma (atributo `signingTime` o, si no está, `/M`), o `None`. |
+| `await evaluate(ref, at)` | Valida una firma (no un DocTimeStamp) a la hora `at` y devuelve una `SignatureEvaluation`. Si `at.in_the_past`, acepta revocación posterior a esa hora. Con conexión, valida a la hora actual. Si la firma o su sello verifican pero no son confiables, prueba cada camino candidato (hasta 5) y los informa en `attempts`. |
+| `fetched()` | Lo descargado hasta el momento (`FetchedRevocation`), o `None` si la sesión no es con conexión. |
+
+`SignatureRef` está en `application/ports.py`: es un identificador de la sesión, no un concepto de negocio.

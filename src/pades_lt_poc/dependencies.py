@@ -9,10 +9,10 @@ from .application.ports import Clock
 from .application.use_cases.certificate_chains import ExtractCertificateChains
 from .application.use_cases.certificate_source import CertificateSource
 from .application.use_cases.inspect_certificates import InspectCertificates
+from .application.use_cases.verify_signatures import VerifySignatures
 from .bootstrap import Services
 from .pki import MiniPki
 from .services.signing import PdfSigner
-from .services.verification import SignatureVerifier
 
 
 def services(request: Request) -> Services:
@@ -31,8 +31,8 @@ def get_signer(request: Request) -> PdfSigner:
     return services(request).signer
 
 
-def get_verifier(request: Request) -> SignatureVerifier:
-    return services(request).verifier
+def get_verify_signatures(request: Request) -> VerifySignatures:
+    return services(request).verify_signatures
 
 
 def get_extract_chains(request: Request) -> ExtractCertificateChains:
@@ -54,7 +54,7 @@ def get_clock(request: Request) -> Clock:
 PkiDep = Annotated[MiniPki, Depends(get_pki)]
 TsaDep = Annotated[DummyTimeStamper, Depends(get_tsa)]
 SignerDep = Annotated[PdfSigner, Depends(get_signer)]
-VerifierDep = Annotated[SignatureVerifier, Depends(get_verifier)]
+VerifySignaturesDep = Annotated[VerifySignatures, Depends(get_verify_signatures)]
 ExtractCertificateChainsDep = Annotated[ExtractCertificateChains, Depends(get_extract_chains)]
 InspectCertificatesDep = Annotated[InspectCertificates, Depends(get_inspect_certificates)]
 CertificateSourceDep = Annotated[CertificateSource, Depends(get_certificate_source)]

@@ -4,7 +4,7 @@ Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`ada
 
 Un adaptador de salida no conoce HTTP, ni la raíz de composición, ni el código que todavía no se migró (`services/`, `pki.py`). Lo verifica el contrato "Los adaptadores de salida no conocen HTTP, la composición ni el código sin migrar" de import-linter.
 
-> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) y los de la extracción de cadenas (paso 4).
+> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) y el de la validación (paso 5).
 
 ## `adapters/outbound/crypto/codec.py`: certificados con `cryptography`
 
@@ -95,3 +95,66 @@ Implementa [`IssuerFetcher`](puertos.md#issuerfetcher) con `HttpIssuerFetcher(ge
 `get` es reemplazable: la app de los tests usa un `HttpIssuerFetcher` cuyo `get` falla siempre ("sin red en los tests") salvo que el test ponga una ruta (fixture `aia`). Así se prueba el adaptador real sin salir a la red.
 
 Tests: `tests/test_issuer_fetcher.py` (contra la app escuchando en un puerto real).
+
+## `adapters/outbound/pyhanko/`: la validación con pyHanko
+
+Implementa [`SignatureValidator`](puertos.md#signaturevalidator). Ningún tipo de pyHanko ni de pyhanko-certvalidator sale de este paquete: todo se traduce a modelos del [dominio](dominio.md#validación-domainverificationpy).
+
+| Módulo | Qué tiene |
+|--------|-----------|
+| `validator.py` | `PyHankoSignatureValidator` y su sesión: abre el PDF, arma el `ValidationContext` de cada firma (`_ContextFactory`), llama a `async_validate_pdf_signature` y traduce el resultado. |
+| `policies.py` | `LegacyRootsPolicy` (SHA-1 sólo para las claves de `legacy_sha1_roots`, V-02) y `UnallocatedFreesPolicy` (entradas libres de iText); `DIFF_POLICIES` por `DiffPolicyMode`. |
+| `trust_paths.py` | Los caminos candidatos de un certificado no confiable, revalidados uno por uno, con el `TrustReason` de cada error. |
+| `fetching.py` | Los fetchers de CRL, OCSP y AIA para el modo con conexión, con timeouts que no tiran abajo la verificación y el caché de CRLs (`CrlCache`). |
+| `crl_index.py` | Un índice de seriales por CRL que reemplaza la búsqueda de pyhanko-certvalidator (CRLs grandes). |
+| `convert.py` | asn1crypto ↔ `Certificate`. |
+| `signed_pdf_reader.py` | El lector de PDFs firmados (paso 4); `open_signed_pdf` lo usa también el validador. |
+
+### El `ValidationContext` de cada firma
+
+| Parámetro | Valor | Por qué |
+|-----------|-------|---------|
+| `trust_roots` | `policy.trust_anchors` | V-01 |
+| `other_certs` | `policy.intermediates` | Los intermedios de la fuente; el DSS suma los suyos. |
+| `revocation_mode` | `hard-fail` | V-03 |
+| `algorithm_usage_policy` | `LegacyRootsPolicy(policy.legacy_sha1_roots)` | V-02 |
+| `retroactive_revinfo` | `at.in_the_past` | Validando en el pasado, la revocación embebida es posterior a la hora de validación (V-08). |
+| `moment` | `at.time` | Sólo sin conexión: pyHanko no descarga con una hora fija. |
+| `allow_fetching`, `fetchers`, `time_tolerance` | `True`, los de la sesión, 2 minutos | Sólo con conexión. La tolerancia cubre el desfasaje de reloj con el servidor que responde (con 1 s, una respuesta "de recién" parecía del futuro). |
+
+Con DSS, el contexto se arma desde el DSS (`as_validation_context`), que agrega sus certificados, CRLs y respuestas OCSP. Sin DSS se pasan listas vacías de revocación: pyHanko lanza `ValueError` si en hard-fail sin descargas no recibe ninguna.
+
+Cada firma usa un contexto nuevo; firma y sello usan el mismo.
+
+### Caminos probados (`trust_paths.attempts`)
+
+pyHanko resume una falla de confianza en una indicación AdES y el mensaje real sólo va al log. Para poder decir por qué, se vuelve a validar cada camino candidato (`path_builder.async_build_paths_lazy`, hasta 5) con el mismo contexto, registrando antes los certificados que trae la firma, y se guarda el error de cada uno. Sólo se hace cuando verifica y no es confiable, porque es caro.
+
+| Error de pyhanko-certvalidator | `TrustReason` |
+|--------------------------------|---------------|
+| `RevokedError` | `revoked` |
+| `InsufficientRevinfoError` con "not recent enough" en el mensaje | `stale_revocation` |
+| Otro `InsufficientRevinfoError` | `missing_revocation` |
+| `ExpiredError` | `expired` |
+| `NotYetValidError` | `not_yet_valid` |
+| `DisallowedAlgorithmError` | `algorithm` |
+| Cualquier otro `ValidationError` | `other` |
+
+### Intermedios del camino
+
+`path_intermediates` son los certificados del `validation_path` de pyHanko sin el ancla ni la hoja. pyHanko devuelve el camino aunque la validación falle; decidir si cuenta (sólo si es confiable, V-06) es del dominio.
+
+### Modo con conexión (`fetching.py`)
+
+`RevocationFetcherBackend` crea un juego de fetchers aiohttp por sesión, con dos arreglos sobre los de pyhanko-certvalidator:
+
+- Un timeout no es un error de descarga para pyHanko (sólo `ClientError`): se propagaba y la verificación entera fallaba. Se convierte en `CRLFetchError`, `OCSPFetchError` o `CertificateFetchError`, que pyHanko trata como "no se pudo descargar".
+- `fetched_certs()` de `AIOHttpCertificateFetcher` lanzaba `TypeError` en cuanto descargaba algo: se aplanan los resultados por URL.
+
+Timeouts: 10 s por OCSP o AIA y 60 s por CRL (la de la AC ONTI pesa ~9 MB). Las CRL se guardan en un `CrlCache` (uno por app, lo crea `bootstrap.build`) hasta su `nextUpdate`, con hasta 32 entradas; las respuestas OCSP no se guardan. Lo descargado se informa en `FetchedRevocation`, y cada CRL dice si salió del caché.
+
+### Índice de CRLs (`crl_index.py`)
+
+pyhanko-certvalidator busca un serial recorriendo la CRL con asn1crypto, entrada por entrada: con la CRL de la AC ONTI (~240 mil entradas) cada búsqueda tarda ~2 s. `install()` reemplaza esa función (`validate_crl.find_cert_in_list`) por una que consulta primero un índice de seriales armado con `cryptography` (~0,15 s por CRL, cacheado por huella, hasta 16). Si el serial no está, responde enseguida; si está, o la CRL es indirecta, delega en la original. Es un parche global al proceso: lo instala `bootstrap.build`, una vez.
+
+Tests: `tests/test_verify.py`, `tests/test_verify_online.py`, `tests/test_crl_index.py`, `tests/test_store.py` y la suite de PDFs (por HTTP y con PDFs reales), goldens `verify_*`.

@@ -55,6 +55,13 @@ class Certificate:
     ca_issuer_urls: tuple[str, ...] | None = field(default=None, compare=False)
     """Las URIs AIA caIssuers (dónde se publica su emisor), en orden. None si no tiene la extensión
     AIA; vacío si la tiene pero sin caIssuers. Incluye las que no son HTTP."""
+    display_name: str = field(default="", compare=False)
+    """El sujeto para mostrar, atributo por atributo y con nombres largos
+    (`Common Name: PoC Root CA, Organization: PoC PAdES, Country: AR`). Es el formato del reporte de validación."""
+    common_name: str | None = field(default=None, compare=False)
+    """El CN del sujeto, si tiene."""
+    signature_hash_algorithm: str | None = field(default=None, compare=False)
+    """El hash con el que lo firmó su emisor (`sha256`, `sha1`, ...); None si no se puede determinar."""
 
     def validity_status(self, now: datetime) -> ValidityStatus:
         """La vigencia en `now`. Los dos extremos cuentan como vigentes."""

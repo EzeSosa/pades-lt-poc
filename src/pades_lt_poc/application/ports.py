@@ -7,12 +7,15 @@ Las implementaciones están en `adapters/outbound/`. Ver docs/arquitectura/puert
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from ..domain.certificates import Certificate, CertificateDetails
-from ..domain.signatures import SignedDocument
+from ..domain.signatures import SignatureKind, SignedDocument
 from ..domain.source import EntryChanges, NewEntry, SeedCertificate, StoredCertificate
+from ..domain.verification import DssSummary, FetchedRevocation, SignatureEvaluation, ValidatedAt, ValidationPolicy
 
 
 class CertificateCodec(Protocol):
@@ -143,4 +146,60 @@ class CertificateRepository(Protocol):
 
     def delete(self, cert_id: int) -> bool:
         """Borra la entrada. Devuelve False si no existía."""
+        ...
+
+
+@dataclass(frozen=True)
+class SignatureRef:
+    """Una firma de la sesión de validación: su posición, su campo y su tipo."""
+
+    index: int
+    field_name: str
+    kind: SignatureKind
+
+
+class ValidationSession(Protocol):
+    """Un PDF abierto para validar, con una política fija. La da `SignatureValidator.open`.
+
+    Con conexión, las descargas (CRL, OCSP, emisores) se comparten entre las firmas del PDF: lo
+    descargado para una sirve para las demás.
+    """
+
+    signatures: tuple[SignatureRef, ...]
+    """En el orden del documento."""
+    dss: DssSummary | None
+    """Cuántos certificados, respuestas OCSP y CRLs tiene el DSS; None si no tiene DSS."""
+    embedded_sha256: frozenset[str]
+    """Huellas de todos los certificados que trae el PDF: DSS, CMS de cada firma y sus sellos."""
+
+    def claimed_signing_time(self, ref: SignatureRef) -> datetime | None:
+        """La hora que declara la firma (atributo signingTime del CMS o, si no está, /M); None si no declara."""
+        ...
+
+    async def evaluate(self, ref: SignatureRef, at: ValidatedAt) -> SignatureEvaluation:
+        """Valida una firma (no un DocTimeStamp) a la hora `at`, con revocación obligatoria (V-03).
+
+        Si `at.in_the_past`, acepta revocación posterior a esa hora (se obtuvo después de firmar).
+        Con conexión, valida a la hora actual (el validador no descarga para validar en el pasado).
+        Si la firma o su sello verifican pero no son confiables, prueba cada camino candidato y lo
+        informa en `attempts`.
+        """
+        ...
+
+    def fetched(self) -> FetchedRevocation | None:
+        """Lo descargado hasta ahora; None si la sesión no es con conexión."""
+        ...
+
+
+class SignatureValidator(Protocol):
+    """Valida firmas PAdES: integridad, camino hasta un ancla, revocación, sello de tiempo y modificaciones.
+
+    Async: con conexión descarga CRL, OCSP y emisores.
+    """
+
+    def open(self, pdf: bytes, policy: ValidationPolicy) -> AbstractAsyncContextManager[ValidationSession]:
+        """Abre `pdf` para validar con `policy`. Al salir del `async with` libera las conexiones.
+
+        Lanza `UnprocessablePdf("El PDF no tiene firmas")` si no tiene ninguna.
+        """
         ...

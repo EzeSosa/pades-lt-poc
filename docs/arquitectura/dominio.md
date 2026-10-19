@@ -2,7 +2,7 @@
 
 El paquete `pades_lt_poc.domain` contiene los modelos, las reglas y los errores de las operaciones de negocio. Es **Python puro**: no importa ninguna biblioteca de infraestructura ni otra capa del paquete (lo verifica el contrato "El dominio es Python puro" de import-linter). Por eso se prueba con datos armados a mano, sin PKI, sin red y sin PDFs.
 
-> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) y las firmas de un PDF y sus cadenas (paso 4). La validación y la firma se agregan en sus pasos. Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
+> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) las firmas de un PDF y sus cadenas (paso 4) y la validación (paso 5). La firma se agrega en su paso. Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
 
 ## Lenguaje ubicuo
 
@@ -31,6 +31,11 @@ Cómo se llama cada concepto en la documentación (castellano) y en el código (
 | Sello de documento | `SignatureKind.DOC_TIMESTAMP` | Un `/DocTimeStamp` (PAdES B-LTA): un sello sobre todo el documento. |
 | Cadena | `ChainResult`, `ChainLink` | Los certificados de hoja a raíz, cada uno con su origen. |
 | Origen de un eslabón | `CertSource` | `cms`, `dss`, `store` o `aia`. |
+| Ancla implícita | `VerifySignatures.implicit_anchors` | Un ancla que no está en la fuente: la raíz de la PoC, que se regenera con la PKI. |
+| Nivel PAdES | `PadesLevel` | B-B, B-T, B-LT o B-LTA, según lo que se pudo verificar. |
+| Autosuficiente | `self_contained` | El PDF alcanza solo para validarse: ninguna cadena se completó con la fuente. |
+| Hora declarada | `ValidationTimeMode.CLAIMED_SIGNING_TIME` | La hora que la firma dice tener (no probada por un sello). |
+| Motivo de desconfianza | `TrustProblem`, `TrustReason` | Por qué una firma o su sello no es confiable, con los caminos probados. |
 | Detalle legible | `CertificateDetails` | Lo que muestra la inspección: nombres atributo por atributo, clave y extensiones como texto. |
 
 ## Certificado (`domain/certificates.py`)
@@ -174,3 +179,69 @@ Tests: `tests/test_domain_chains.py` (puro), `tests/test_extract_chains.py` (cas
 ## Detalle legible (`CertificateDetails`, en `domain/certificates.py`)
 
 Lo que muestra `/certificates/inspect` además de lo que ya tiene `Certificate`: `version`, `subject` e `issuer` atributo por atributo (`NameAttribute`: `oid`, `name`, `value`), `signature_algorithm`, `public_key` (`PublicKeyInfo`: `type`, `size` y, si es EC, `curve`) y `extensions` (`ExtensionInfo`: `oid`, `name`, `critical` y `values`, una línea de texto por valor). Lo arma `CertificateCodec.describe`; qué texto lleva cada extensión está en [adaptadores.md](adaptadores.md#adaptersoutboundcryptodetailspy-el-detalle-legible).
+
+## Validación (`domain/verification.py`)
+
+Qué se decide al validar las firmas de un PDF. Verificar firmas, construir caminos y consultar revocación lo hace el adaptador (pyHanko), que devuelve una `SignatureEvaluation` por firma; todo lo que se decide con eso está acá. Los conceptos están en [pades.md](../pades.md#10-flujo-de-verify-e-interpretación-del-resultado).
+
+### Opciones
+
+`VerificationOptions` junta las tres opciones de `/verify`, con los mismos valores que la API:
+
+| Opción | Valores | Efecto |
+|--------|---------|--------|
+| `validation_time` (`ValidationTimeMode`) | `now` (por defecto), `claimed_signing_time` | A qué hora se valida cada firma (V-08). Con `claimed_signing_time` agrega `warning`. |
+| `diff_policy` (`DiffPolicyMode`) | `default`, `allow_unallocated_free_entries` | Qué modificaciones posteriores se toleran. La segunda agrega `diff_policy_note`. |
+| `revocation` (`RevocationMode`) | `offline` (por defecto), `online` | Si se descarga revocación. `online` agrega `revocation_note` y limita el nivel (V-05). |
+
+`check()` aplica V-04: con conexión, sólo a la hora actual.
+
+### Política
+
+`ValidationPolicy` es lo que recibe el adaptador: `trust_anchors` (V-01: `trust_anchors(implícitas, raíces confiables)`), `intermediates` (los de la fuente), `legacy_sha1_roots` (V-02: `legacy_sha1_roots(anclas)`, las que nacieron con SHA-1), `diff_policy` y `online`. La revocación no es una opción: siempre es obligatoria (V-03).
+
+### Evaluación de cada firma
+
+`SignatureEvaluation` es lo que devuelve el adaptador por cada firma: `subfilter`, `signer`, `bottom_line`, `intact`, `valid`, `trusted`, `indication` (la indicación AdES si no es confiable), `attempts` (los caminos probados, si verifica y no es confiable), `coverage`, `path_intermediates` (los intermedios del camino, sin hoja ni ancla), `modifications` (`Modifications`: nivel, DocMDP y la modificación sospechosa si hay), `details` (el reporte en texto de pyHanko) y `timestamp` (`TimestampEvaluation`, con los mismos datos para el sello de tiempo de la firma).
+
+`validation_moment(modo, hora_declarada, ahora)` decide la hora (V-08) y devuelve un `ValidatedAt` con `time`, `source` (a qué hora se validó en realidad: si la firma no declara hora, la actual) e `in_the_past`.
+
+### Por qué no es confiable
+
+`trust_problem(...)` devuelve un `TrustProblem` (`reason`, `indication`, `summary`, `hint`, `paths`) o `None` si es confiable (V-09):
+
+| Situación | `reason` | `summary` / `hint` |
+|-----------|----------|--------------------|
+| La firma no verifica | `not_evaluated` | No se evaluó la confianza. |
+| No hay ningún camino | `no_path` | Falta una intermedia o la raíz; sugiere agregarla a la fuente. |
+| Algún camino valida | `other` | El problema es otro (p. ej. el uso de la clave): revisar el detalle de pyHanko. |
+| Todos fallan | el más informativo de los que aparecen, en este orden: `revoked`, `stale_revocation`, `missing_revocation`, `algorithm`, `other`, `not_yet_valid`, `expired` | `REASONS` (con conexión, `ONLINE_REASONS` para la revocación) y la sugerencia de `_hint`. |
+
+Un camino vencido suele ser la versión vieja de una CA renovada, por eso `expired` va último.
+
+| Sugerencia (`hint`) | Cuándo |
+|---------------------|--------|
+| "Probá validar con conexión, que descarga CRL y OCSP actualizadas." | Revocación faltante o vencida, sin conexión. |
+| "... o a la hora declarada por la firma." (agregado) | Revocación vencida, sin conexión y validando a la hora actual. |
+| "Se validó a la hora actual: probá validar a la hora declarada por la firma." | Un certificado vencido, validando a la hora actual. |
+
+Cada camino es un `PathAttempt`: `chain` (hoja → ancla), `reason` (`TrustReason`, o `None` si valida) y `message` (el de pyhanko-certvalidator).
+
+### Uso de la fuente y nivel
+
+- `completed_from_store(confiable, intermedios_del_camino, huellas_del_PDF, huellas_de_la_fuente)` (V-06): los intermedios que el PDF no trae y la fuente sí, sólo si es confiable.
+- `SignatureVerdict` junta, por firma, la evaluación, la hora a la que se validó, el `trust_problem` y `completed_from_store` (y lo mismo para su sello en `TimestampVerdict`). `used_store` dice si la firma o su sello usaron la fuente. Para un DocTimeStamp sólo tiene campo y tipo: no se valida aparte.
+- `pades_level(veredictos, hay_DSS, autosuficiente, con_conexión)` (V-05, V-07):
+
+| Nivel | Condición |
+|-------|-----------|
+| `PAdES B-B` | Hay firmas (o sólo DocTimeStamps). |
+| `PAdES B-T` | Todas las firmas tienen sello de tiempo. |
+| `PAdES B-LT` | Además hay DSS, todas dan `bottom_line`, ninguna usó la fuente y se validó **sin** conexión. |
+| `PAdES B-LTA` | Además hay al menos un DocTimeStamp. |
+
+`VerificationReport` es el resultado completo: las opciones, el nivel, el resumen del DSS (`DssSummary`), lo descargado (`FetchedRevocation`: CRLs, respuestas OCSP y emisores), cuántas anclas e intermedios se usaron, si el PDF fue autosuficiente (`self_contained`, con `store_note` si no) y los veredictos.
+
+Los textos que ve el usuario (notas, advertencias, resúmenes y sugerencias) son constantes de este módulo.
+
+Tests: `tests/test_domain_verification.py` (puro), `tests/test_verify_signatures.py` (caso de uso con un validador falso).

@@ -115,20 +115,20 @@ def test_add_rejects_end_entity_and_garbage(client):
 
 # --------------------------------------------------------------------------- modificaciones y bajas
 def test_disable_and_untrust_take_effect_immediately(client, services):
-    verifier = services.verifier
+    verifier = services.verify_signatures
     root_2016 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2016.der"))
     entry = next(c for c in listing(client, kind="root")["certificates"] if c["sha256"] == root_2016.sha256.hex())
 
     r = client.patch(f"/store/certificates/{entry['id']}", json={"enabled": False, "notes": "en revisión"})
     assert (r.json()["enabled"], r.json()["notes"]) == (False, "en revisión")
-    assert root_2016.dump() not in [c.dump() for c in verifier.trust_roots()]
+    assert root_2016.dump() not in [c.der for c in verifier.trust_roots()]
     assert listing(client)["summary"]["disabled"] == 1
 
     client.patch(f"/store/certificates/{entry['id']}", json={"enabled": True, "trusted": False})
-    assert root_2016.dump() not in [c.dump() for c in verifier.trust_roots()]
+    assert root_2016.dump() not in [c.der for c in verifier.trust_roots()]
 
     client.patch(f"/store/certificates/{entry['id']}", json={"trusted": True})
-    assert root_2016.dump() in [c.dump() for c in verifier.trust_roots()]
+    assert root_2016.dump() in [c.der for c in verifier.trust_roots()]
 
 
 def test_only_roots_can_be_trusted(client):

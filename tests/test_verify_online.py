@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import hashes
 from pyhanko_certvalidator.errors import CRLFetchError
 
 from conftest import load_signer, pki, sign
-from pades_lt_poc.services.fetching import RevocationFetcherBackend
+from pades_lt_poc.adapters.outbound.pyhanko.fetching import RevocationFetcherBackend
 
 
 @pytest.fixture(autouse=True)
