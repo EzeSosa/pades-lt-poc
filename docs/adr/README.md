@@ -6,6 +6,7 @@ Cada decisión de arquitectura que cuesta revertir queda registrada acá: el con
 |-----|--------|--------|
 | [0001](0001-arquitectura-hexagonal.md) | Arquitectura hexagonal para las operaciones de negocio | Aceptado |
 | [0002](0002-certificado-de-dominio-sobre-der.md) | El certificado de dominio se construye sobre el DER | Aceptado |
+| [0003](0003-testbed-fuera-del-nucleo.md) | La PKI, el OCSP y la TSA de la PoC son un testbed fuera del núcleo | Aceptado |
 
 ## Formato
 

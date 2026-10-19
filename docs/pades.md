@@ -63,7 +63,7 @@ Función que convierte datos de cualquier tamaño en un valor de tamaño fijo (e
 
 Cada entidad tiene un **par de claves**: una **privada** (secreta, sólo la usa el dueño para firmar) y una **pública** (se distribuye, sirve para verificar). Lo que se firma con la privada sólo se verifica con la pública correspondiente.
 
-> En el código: todas las claves son RSA de 3072 bits (`_new_key()` en [pki.py](../src/pades_lt_poc/pki.py)).
+> En el código: todas las claves son RSA de 3072 bits (`_new_key()` en [testbed/pki.py](../src/pades_lt_poc/testbed/pki.py)).
 
 ### Firma digital
 
@@ -114,7 +114,7 @@ PoC Root CA  (autofirmada, 10 años)             publica /pki/root.crl
       └── PoC OCSP Responder            (2 años)
 ```
 
-Se genera sola la primera vez que arranca la app (`MiniPki.ensure()`, desde `bootstrap.build`), y queda en `$PKI_DIR`.
+Se genera sola la primera vez que arranca la app (`MiniPki.ensure()`, desde `Testbed.create` en `bootstrap.build`), y queda en `$PKI_DIR`. Es parte del *testbed*: el mundo externo que la PoC simula, separado del núcleo ([ADR-0003](adr/0003-testbed-fuera-del-nucleo.md)).
 
 ### Cadena de certificación y ancla de confianza
 
@@ -174,7 +174,7 @@ Ambas se descargaron de los enlaces de la [página oficial de la AC Raíz](https
 
 **Crítica**: una extensión marcada como crítica que el validador no entienda hace que rechace el certificado.
 
-> En el código: `_build_root`, `_build_intermediate` y `_build_leaf` en [pki.py](../src/pades_lt_poc/pki.py).
+> En el código: `_build_root`, `_build_intermediate` y `_build_leaf` en [testbed/pki.py](../src/pades_lt_poc/testbed/pki.py).
 
 ---
 
@@ -196,7 +196,7 @@ Cada entrada puede llevar además el **motivo** (`reasonCode`): clave comprometi
 
 Ventaja: se puede cachear y distribuir. Desventaja: crece con cada revocación y su frescura depende de `nextUpdate`.
 
-> En el código: `build_crl()` en [pki.py](../src/pades_lt_poc/pki.py) genera una CRL **nueva en cada request**, con validez de 1 día y `CRLNumber` igual al timestamp Unix. Se sirve en DER (`application/pkix-crl`) en `GET /pki/{root|intermediate}.crl`.
+> En el código: `build_crl()` en [testbed/pki.py](../src/pades_lt_poc/testbed/pki.py) genera una CRL **nueva en cada request**, con validez de 1 día y `CRLNumber` igual al timestamp Unix. Se sirve en DER (`application/pkix-crl`) en `GET /pki/{root|intermediate}.crl`.
 
 ### OCSP (Online Certificate Status Protocol)
 
@@ -213,7 +213,7 @@ Protocolo (RFC 6960) para preguntar el estado de **un** certificado puntual. El 
 
 **`ocsp-nocheck`**: si el respondedor tuviera que validarse por OCSP, sería un círculo vicioso. Esta extensión le indica al validador que no consulte su revocación. La contrapartida es que el certificado del respondedor debería tener una vida corta.
 
-> En el código: `ocsp_respond()` en [pki.py](../src/pades_lt_poc/pki.py). Endpoints `POST /ocsp` (cuerpo DER) y `GET /ocsp/{base64}` (RFC 6960 Apéndice A.1). Se puede contrastar con OpenSSL (ver README).
+> En el código: `ocsp_respond()` en [testbed/pki.py](../src/pades_lt_poc/testbed/pki.py). Endpoints `POST /ocsp` (cuerpo DER) y `GET /ocsp/{base64}` (RFC 6960 Apéndice A.1). Se puede contrastar con OpenSSL (ver README).
 
 ### Qué mecanismo cubre a cada certificado en la PoC
 
@@ -314,7 +314,7 @@ Validar un sello implica validar la firma de la TSA y su cadena (incluida la rev
 | **Signature timestamp** | El valor de la firma del firmante | Atributo no firmado `signature-time-stamp-token` dentro del CMS | B-T |
 | **Document timestamp** | Todo el PDF (incluido el DSS) | Un campo de firma propio, de tipo `/DocTimeStamp` | B-LTA |
 
-> En el código: `POST /tsa` ([routers/tsa.py](../src/pades_lt_poc/routers/tsa.py)) expone el `DummyTimeStamper` de pyHanko (toma la hora del servidor y usa un OID de política de ejemplo). La firma lo consume con `HTTPTimeStamper(tsa_url)` como si fuera una TSA externa. Los tokens incluyen la cadena `tsa → intermedia → raíz`.
+> En el código: `POST /tsa` ([testbed/http.py](../src/pades_lt_poc/testbed/http.py), con el motor de [testbed/tsa.py](../src/pades_lt_poc/testbed/tsa.py)) expone el `DummyTimeStamper` de pyHanko (toma la hora del servidor y usa un OID de política de ejemplo). La firma lo consume con `HTTPTimeStamper(tsa_url)` como si fuera una TSA externa. Los tokens incluyen la cadena `tsa → intermedia → raíz`.
 
 ---
 

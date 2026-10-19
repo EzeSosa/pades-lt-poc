@@ -110,7 +110,7 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados), **paso 3** (fuente de certificados), **paso 4** (extracción e inspección de certificados), **paso 5** (validación) y **paso 6** (firma). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados), **paso 3** (fuente de certificados), **paso 4** (extracción e inspección de certificados), **paso 5** (validación), **paso 6** (firma) y **paso 7** (testbed fuera del núcleo). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
@@ -121,13 +121,10 @@ src/pades_lt_poc/
 ├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
 ├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
 ├── dependencies.py   inyecta en los endpoints los servicios de app.state.services
-├── pki.py            MiniPki: la mini PKI de una carpeta y una URL base (certificados, CRLs, OCSP, revocación)
 ├── routers/          endpoints HTTP, uno por área: validan la entrada y delegan
-│   ├── pki.py  ocsp.py  tsa.py
 │   ├── signing.py  verification.py  certificates.py  store.py
 │   └── ui.py             sirve las páginas de /ui
-├── services/         lo que falta migrar, sin nada de HTTP
-│   └── timestamping.py   motor de la TSA      (/tsa)
+├── testbed/          el mundo externo simulado: la mini PKI, el OCSP y la TSA, con sus endpoints (/pki, /ocsp, /tsa)
 ├── seed/             la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
 └── static/           la UI: una página y un script por pantalla, ui.css, ui.js y un JS por tab (servidos en /ui/static)
 ```

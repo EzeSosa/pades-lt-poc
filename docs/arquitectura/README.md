@@ -22,7 +22,7 @@ Este documento describe cómo está organizado el código, qué puede depender d
 > | 4 | Certificados (extracción e inspección) | Hecho |
 > | 5 | Validación | Hecho |
 > | 6 | Firma | Hecho |
-> | 7 | Testbed (PKI, OCSP, TSA) fuera del núcleo | Pendiente |
+> | 7 | Testbed (PKI, OCSP, TSA) fuera del núcleo | Hecho |
 > | 8 | Limpieza | Pendiente |
 
 ## Mapa actual
@@ -54,12 +54,11 @@ src/pades_lt_poc/
 │   ├── seed_catalog.py              SeedCatalog con los archivos de seed/
 │   └── clock.py                     Clock con el reloj del sistema
 ├── config.py       Settings: la configuración, leída una vez del entorno
-├── bootstrap.py    raíz de composición: build(settings, clock) -> Services
-├── app.py          create_app(settings, clock): FastAPI, lifespan, routers y manejo de errores
-├── dependencies.py inyecta en los endpoints los servicios de app.state.services
-├── pki.py          MiniPki: la PKI de prueba de una carpeta y una URL base
-├── routers/        endpoints HTTP
-└── services/       lo que falta migrar: el motor de la TSA (testbed)
+├── bootstrap.py    raíz de composición: build(settings, clock, issuer_fetcher) -> Services
+├── app.py          create_app(settings, clock, issuer_fetcher): FastAPI, lifespan, routers y manejo de errores
+├── dependencies.py inyecta en los endpoints los casos de uso de app.state.services
+├── routers/        endpoints HTTP de las operaciones de negocio, con sus presenters
+└── testbed/        el mundo externo simulado (ADR-0003): MiniPki, motor de la TSA y sus endpoints (/pki, /ocsp, /tsa)
 ```
 
 Flujo de arranque:
@@ -68,13 +67,13 @@ Flujo de arranque:
 create_app(settings)                       importar app.py no lee nada ni crea nada
    └── lifespan (al arrancar uvicorn o el TestClient)
          └── bootstrap.build(settings) ──► Services
-               ├── MiniPki(settings.pki_dir, settings.public_base_url).ensure()
+               ├── Testbed.create(settings.pki_dir, settings.public_base_url)
+               │                                  (genera la PKI si no existe; carga el motor de la TSA)
                ├── crl_index.install()            (adapters/outbound/pyhanko: global de pyhanko-certvalidator, una vez)
                ├── SqliteCertificateRepository(settings.cert_store_db, codec)
                ├── CertificateSource(repositorio, codec, PackagedSeedCatalog(), clock).initialize()
                │                                  (carga inicial la primera vez, y el snapshot)
                ├── CrlCache()                     (uno por app)
-               ├── load_tsa(pki)
                ├── SignPdf(PyHankoPdfSigner.from_files(clave, cert y cadena del firmante, raíz de la PoC))
                ├── VerifySignatures(PyHankoSignatureValidator(codec, fetchers con el CrlCache),
                │                    source, [raíz de la PoC], clock)
@@ -106,7 +105,7 @@ Lo que antes era estado global del proceso ahora se crea o se instala acá:
 
 - **Índice de CRLs** (`adapters/outbound/pyhanko/crl_index.install()`): reemplaza una función de pyhanko-certvalidator, que no la recibe por parámetro, así que sigue siendo global al proceso. Se instala en `build`, no como efecto lateral de crear el validador. Llamarla más de una vez no tiene efecto adicional.
 - **Caché de CRLs** (`CrlCache`): era un singleton del módulo `fetching` (`CRL_CACHE`). Ahora hay uno por app, que se pasa al `RevocationFetcherBackend` de cada verificación con conexión. Los tests lo vacían con `services.crl_cache.clear()`.
-- **La PKI de prueba** (`MiniPki`): antes eran funciones de módulo que leían `PKI_DIR` y `BASE_URL`; ahora es un objeto con su carpeta y su URL, y `bootstrap.build` saca de ella lo que necesita cada pieza: los archivos del firmante para `PyHankoPdfSigner.from_files`, la raíz como ancla implícita de `VerifySignatures`, y la PKI entera para la TSA (`load_tsa(pki)`). Ningún caso de uso ni adaptador la conoce.
+- **La PKI de prueba** (`MiniPki`, en `testbed/`): antes eran funciones de módulo que leían `PKI_DIR` y `BASE_URL`; ahora es un objeto con su carpeta y su URL, y `bootstrap.build` saca de ella lo que necesita cada pieza: los archivos del firmante para `PyHankoPdfSigner.from_files`, la raíz como ancla implícita de `VerifySignatures`, y la PKI entera para la TSA (`load_tsa(pki)`). Ningún caso de uso ni adaptador la conoce.
 
 ### Arranque con uvicorn
 
@@ -136,14 +135,11 @@ Se verifican en `tests/test_architecture.py` (import-linter, contratos en `[tool
 
 | Regla | Por qué |
 |-------|---------|
-| `services` y `pki` no importan `app`, `dependencies`, `routers`, FastAPI, Starlette ni uvicorn | La lógica no sabe que la llaman por HTTP. |
-| `pki` no importa `services` | La PKI de prueba es el "mundo externo": no depende de quien la consume. |
-| `services` y `pki` no importan `bootstrap` ni `config` | Reciben lo que necesitan por parámetro; quién los arma y de dónde sale la configuración es asunto de la raíz de composición. |
-| Sólo `config.py` lee variables de entorno | Un solo lugar para saber qué se puede configurar. |
-| `domain` no importa ninguna otra capa del paquete ni pyHanko, asn1crypto, cryptography, FastAPI, Starlette, uvicorn, requests, aiohttp ni sqlite3 | El dominio es Python puro: se prueba sin infraestructura y no cambia cuando cambia una biblioteca. |
+| `domain` no importa ninguna otra parte del paquete ni pyHanko, asn1crypto, cryptography, FastAPI, Starlette, uvicorn, requests, aiohttp ni sqlite3 | El dominio es Python puro: se prueba sin infraestructura y no cambia cuando cambia una biblioteca. |
 | `application` sólo importa `domain` (y las mismas bibliotecas prohibidas) | Los casos de uso conocen a los adaptadores sólo por sus puertos. |
-| `adapters.outbound` no importa `services`, `routers`, `pki`, `bootstrap`, `config`, `app`, `dependencies` ni FastAPI | Un adaptador implementa un puerto y nada más: no sabe quién lo llama ni cómo se configura la app. |
+| `adapters.outbound` no importa `routers`, `dependencies`, `app`, `bootstrap`, `config`, `testbed` ni FastAPI | Un adaptador implementa un puerto y nada más: no sabe quién lo llama, cómo se configura la app ni qué PKI hay detrás. |
+| `routers` y `dependencies` no importan `bootstrap`, `config`, `app` ni `testbed` (tampoco de forma indirecta) | Los endpoints de negocio conocen los casos de uso, no cómo se arman. |
+| `testbed` no importa `domain`, `application`, `adapters`, `routers`, `dependencies`, `bootstrap`, `config` ni `app` | Es el mundo externo simulado: no depende de quien lo consume (ADR-0003). |
+| Sólo `config.py` lee variables de entorno | Un solo lugar para saber qué se puede configurar. |
 
-Mientras dure la migración, el código sin migrar (`services/`) sí puede usar adaptadores y el dominio: es el que se va vaciando paso a paso.
-
-Cada paso de la migración agrega las reglas de las capas que crea.
+Las reglas de import-linter cuentan los imports indirectos: si `routers` importara `dependencies` y `dependencies` importara `bootstrap`, `routers` estaría viendo al testbed. Por eso `dependencies.py` lee `app.state.services` sin importar `bootstrap`.

@@ -2,7 +2,7 @@
 
 Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`adapters/outbound/`) implementan los [puertos](puertos.md) con una biblioteca concreta. Los **de entrada** (por ahora, los `routers/` de FastAPI) traducen un pedido externo a un caso de uso.
 
-Un adaptador de salida no conoce HTTP, ni la raíz de composición, ni el código que todavía no se migró (`services/`, `pki.py`). Lo verifica el contrato "Los adaptadores de salida no conocen HTTP, la composición ni el código sin migrar" de import-linter.
+Un adaptador de salida no conoce los endpoints, ni la raíz de composición, ni el testbed. Lo verifica el contrato "Los adaptadores de salida no conocen HTTP entrante, la composición ni el testbed" de import-linter.
 
 > Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) el de la validación (paso 5) y el de la firma (paso 6).
 

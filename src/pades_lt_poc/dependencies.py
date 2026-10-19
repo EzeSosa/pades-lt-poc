@@ -1,9 +1,11 @@
-"""Dependencias de FastAPI: los servicios se crean una vez en el lifespan (`bootstrap.build`) y se inyectan en los endpoints."""
+"""Dependencias de FastAPI: los casos de uso se crean una vez en el lifespan (`bootstrap.build`) y se inyectan en los endpoints.
+
+No importa `bootstrap`: los endpoints conocen los casos de uso, no cómo se arman (ni el testbed).
+"""
 
 from typing import Annotated
 
 from fastapi import Depends, Request
-from pyhanko.sign.timestamps import DummyTimeStamper
 
 from .application.ports import Clock
 from .application.use_cases.certificate_chains import ExtractCertificateChains
@@ -11,20 +13,11 @@ from .application.use_cases.certificate_source import CertificateSource
 from .application.use_cases.inspect_certificates import InspectCertificates
 from .application.use_cases.sign_pdf import SignPdf
 from .application.use_cases.verify_signatures import VerifySignatures
-from .bootstrap import Services
-from .pki import MiniPki
 
 
-def services(request: Request) -> Services:
+def services(request: Request):
+    """Los `bootstrap.Services` de la app."""
     return request.app.state.services
-
-
-def get_pki(request: Request) -> MiniPki:
-    return services(request).pki
-
-
-def get_tsa(request: Request) -> DummyTimeStamper:
-    return services(request).tsa_engine
 
 
 def get_sign_pdf(request: Request) -> SignPdf:
@@ -51,8 +44,6 @@ def get_clock(request: Request) -> Clock:
     return services(request).clock
 
 
-PkiDep = Annotated[MiniPki, Depends(get_pki)]
-TsaDep = Annotated[DummyTimeStamper, Depends(get_tsa)]
 SignPdfDep = Annotated[SignPdf, Depends(get_sign_pdf)]
 VerifySignaturesDep = Annotated[VerifySignatures, Depends(get_verify_signatures)]
 ExtractCertificateChainsDep = Annotated[ExtractCertificateChains, Depends(get_extract_chains)]

@@ -4,7 +4,7 @@ from pyhanko.keys import load_cert_from_pemder, load_private_key_from_pemder
 from pyhanko.sign.timestamps import DummyTimeStamper
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-from ..pki import MiniPki
+from .pki import MiniPki
 
 
 def load_tsa(pki: MiniPki) -> DummyTimeStamper:

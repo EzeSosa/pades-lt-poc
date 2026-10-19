@@ -7,7 +7,6 @@ Cada regla tiene un **estado de migración**:
 - **Dominio**: la regla vive en `domain/` y tiene tests puros, sin PKI ni red.
 - **Caso de uso**: la regla la orquesta un caso de uso de `application/`, probado con fakes.
 - **Adaptador**: la regla es parte del contrato de un puerto y la cumple su implementación (p. ej. la revocación obligatoria, que se le pide a pyHanko). La cubren los tests del adaptador y los de los endpoints.
-- **Sin migrar**: la regla sigue en `services/`, mezclada con la biblioteca que hace el trabajo. La cubren los tests de los endpoints y los de contrato. Pasa al dominio en el paso que se indica.
 
 ## Fuente de certificados (F)
 

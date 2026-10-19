@@ -31,7 +31,7 @@ from pyhanko.sign.signers.pdf_signer import PdfTimeStamper
 from pades_lt_poc.adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
 from pades_lt_poc.app import create_app
 from pades_lt_poc.config import Settings
-from pades_lt_poc.pki import MiniPki
+from pades_lt_poc.testbed.pki import MiniPki
 
 
 class TestClock:
@@ -130,7 +130,7 @@ def pki_server(client):
 
 @pytest.fixture(scope="session")
 def timestamper(services):
-    return services.tsa_engine
+    return services.testbed.tsa_engine
 
 
 @pytest.fixture

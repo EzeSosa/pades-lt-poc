@@ -22,12 +22,13 @@ Endpoints:
 Estructura:
   config.py     la configuración (variables de entorno), leída una vez al crear la app
   bootstrap.py  raíz de composición: crea los servicios y los conecta
-  routers/      endpoints HTTP, uno por área
-  services/     una clase por operación (firmar, verificar, extraer e inspeccionar certificados) y la
-                fuente de certificados (SQLite), sin HTTP
+  domain/       Python puro: modelos y reglas de negocio
+  application/  casos de uso y los puertos que necesitan
+  adapters/     implementaciones de los puertos (pyHanko, cryptography, SQLite, HTTP)
+  routers/      endpoints HTTP de las operaciones de negocio
+  testbed/      la PKI, el OCSP y la TSA de la PoC, con sus endpoints (/pki, /ocsp, /tsa)
   seed/         la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
   static/       las páginas de /ui, su CSS y un JS por tab (servidos en /ui/static)
-  pki.py        la mini PKI (certificados, CRLs, OCSP)
 
 La app se crea con `create_app()` (uvicorn: `--factory pades_lt_poc.app:create_app`), así que
 importar este módulo no lee la configuración ni crea nada.
@@ -41,8 +42,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from . import bootstrap
 from .application.ports import Clock, IssuerFetcher
 from .config import Settings
-from .routers import certificates, ocsp, signing, store, tsa, ui, verification
-from .routers import pki as pki_router
+from .routers import certificates, signing, store, ui, verification
+from .testbed import Testbed
+from .testbed.http import create_router as testbed_router
 from .domain.errors import UnprocessableInput
 
 
@@ -64,7 +66,8 @@ def create_app(
         services.close()
 
     app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
-    for module in (pki_router, ocsp, tsa, signing, verification, certificates, store, ui):
+    app.include_router(testbed_router(_testbed))  # /pki, /ocsp y /tsa: el mundo externo simulado
+    for module in (signing, verification, certificates, store, ui):
         app.include_router(module.router)
     app.mount("/ui/static", ui.RevalidatedStaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 
@@ -77,6 +80,10 @@ def create_app(
         return RedirectResponse("/ui/firmas")
 
     return app
+
+
+def _testbed(request: Request) -> Testbed:
+    return request.app.state.services.testbed
 
 
 def main() -> None:
