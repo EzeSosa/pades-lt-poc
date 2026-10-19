@@ -42,7 +42,7 @@ from . import bootstrap
 from .config import Settings
 from .routers import certificates, ocsp, signing, store, tsa, ui, verification
 from .routers import pki as pki_router
-from .services import UnprocessableInput
+from .domain.errors import UnprocessableInput
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

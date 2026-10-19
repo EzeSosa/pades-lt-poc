@@ -11,10 +11,7 @@ import requests
 from asn1crypto import cms
 from asn1crypto import x509 as asn1_x509
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
-from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import AuthorityInformationAccessOID
 from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.errors import SignatureValidationError
@@ -26,9 +23,10 @@ from pyhanko.sign.validation.generic_cms import (
 )
 from pyhanko.sign.validation.pdf_embedded import EmbeddedPdfSignature
 
+from ..adapters.outbound.crypto.codec import issued_by, parse_certs
 from . import read_signed_pdf
 
-if TYPE_CHECKING:  # store importa de este módulo
+if TYPE_CHECKING:
     from .store import CertificateStore
 
 AIA_TIMEOUT = 5  # segundos por descarga
@@ -128,7 +126,7 @@ class AiaFetcher:
         for url in urls:
             if url not in self._cache:
                 try:
-                    self._cache[url] = _parse_certs(_http_get(url))
+                    self._cache[url] = parse_certs(_http_get(url))
                 except (requests.RequestException, ValueError) as e:
                     self._cache[url] = f"{url}: {e}"
             got = self._cache[url]
@@ -145,22 +143,6 @@ def _http_get(url: str) -> bytes:
     r = requests.get(url, timeout=AIA_TIMEOUT)
     r.raise_for_status()
     return r.content
-
-
-def _parse_certs(data: bytes) -> list[x509.Certificate]:
-    """Los `.crt`/`.p7c` publicados en AIA pueden venir en DER, PEM o PKCS#7."""
-    loaders = (
-        lambda d: [x509.load_der_x509_certificate(d)],
-        x509.load_pem_x509_certificates,
-        pkcs7.load_der_pkcs7_certificates,
-        pkcs7.load_pem_pkcs7_certificates,
-    )
-    for load in loaders:
-        try:
-            return load(data)
-        except ValueError:
-            continue
-    raise ValueError("no es un certificado DER, PEM ni PKCS#7")
 
 
 def _check_integrity(
@@ -192,36 +174,6 @@ def _check_integrity(
     return intact, valid, None
 
 
-def _issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
-    """True si `issuer` firmó `cert` (nombre del emisor + firma verificada)."""
-    try:
-        cert.verify_directly_issued_by(issuer)
-    except ValueError as e:
-        # cryptography rechaza algoritmos débiles como SHA-1, que siguen usando
-        # PKIs reales (p. ej. la AC Raíz de Argentina firmando a sus CAs). Acá
-        # sólo armamos la cadena, no evaluamos política: se verifica a mano.
-        return "Unsupported signature algorithm" in str(e) and _verify_legacy(cert, issuer)
-    except (TypeError, InvalidSignature):
-        return False
-    return True
-
-
-def _verify_legacy(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
-    if cert.issuer != issuer.subject or cert.signature_hash_algorithm is None:
-        return False
-    key = issuer.public_key()
-    try:
-        if isinstance(key, rsa.RSAPublicKey):
-            key.verify(cert.signature, cert.tbs_certificate_bytes, padding.PKCS1v15(), cert.signature_hash_algorithm)
-        elif isinstance(key, ec.EllipticCurvePublicKey):
-            key.verify(cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(cert.signature_hash_algorithm))
-        else:
-            return False
-    except (InvalidSignature, ValueError, TypeError):
-        return False
-    return True
-
-
 def _build_chain(
     leaf: x509.Certificate, pool: dict[x509.Certificate, str], fetcher: AiaFetcher | None
 ) -> tuple[list[tuple[x509.Certificate, str]], list[str]]:
@@ -232,13 +184,13 @@ def _build_chain(
     """
     chain = [(leaf, pool[leaf])]
     errors: list[str] = []
-    while not _issued_by(chain[-1][0], chain[-1][0]):
+    while not issued_by(chain[-1][0], chain[-1][0]):
         current, used = chain[-1][0], [c for c, _ in chain]
         candidates = [(c, src) for c, src in pool.items() if c not in used]
-        issuer = next(((c, s) for c, s in candidates if _issued_by(current, c)), None)
+        issuer = next(((c, s) for c, s in candidates if issued_by(current, c)), None)
         if issuer is None and fetcher is not None:
             fetched, errs = fetcher.issuers(current)
-            issuer = next(((c, "aia") for c in fetched if c not in used and _issued_by(current, c)), None)
+            issuer = next(((c, "aia") for c in fetched if c not in used and issued_by(current, c)), None)
             if issuer is None:
                 errors.extend(errs or [f"{current.subject.rfc4514_string()}: AIA no trae a su emisor"])
         if issuer is None:
@@ -248,7 +200,7 @@ def _build_chain(
 
 
 def _describe(cert: x509.Certificate, position: int, source: str) -> dict:
-    self_signed = _issued_by(cert, cert)
+    self_signed = issued_by(cert, cert)
     der = cert.public_bytes(serialization.Encoding.DER)
     return {
         "type": "end_entity" if position == 0 else "root" if self_signed else "intermediate",
@@ -291,7 +243,7 @@ def _extract_chain(
         by_der.setdefault(c.dump(), src)
     pool = {x509.load_der_x509_certificate(der): src for der, src in by_der.items()}
     chain, aia_errors = _build_chain(next(iter(pool)), pool, fetcher)
-    out["chain_complete"] = _issued_by(chain[-1][0], chain[-1][0])
+    out["chain_complete"] = issued_by(chain[-1][0], chain[-1][0])
     out["certificates"] = [_describe(c, i, src) for i, (c, src) in enumerate(chain)]
     if aia_errors:
         out["aia_errors"] = aia_errors

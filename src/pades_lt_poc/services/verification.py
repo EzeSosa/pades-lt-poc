@@ -19,7 +19,8 @@ from pyhanko_certvalidator.fetchers import FetcherBackend, Fetchers
 from pyhanko_certvalidator.path import ValidationPath
 from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowWeakAlgorithmsPolicy
 
-from . import UnprocessableInput, read_signed_pdf
+from ..domain.errors import UnprocessableInput
+from . import read_signed_pdf
 from .store import CertificateStore, StoreSnapshot
 from .trust_problems import diagnose
 

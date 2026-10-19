@@ -5,6 +5,7 @@ Cada decisión de arquitectura que cuesta revertir queda registrada acá: el con
 | ADR | Título | Estado |
 |-----|--------|--------|
 | [0001](0001-arquitectura-hexagonal.md) | Arquitectura hexagonal para las operaciones de negocio | Aceptado |
+| [0002](0002-certificado-de-dominio-sobre-der.md) | El certificado de dominio se construye sobre el DER | Aceptado |
 
 ## Formato
 

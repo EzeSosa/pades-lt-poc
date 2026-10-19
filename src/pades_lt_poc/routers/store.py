@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..dependencies import CertificateStoreDep
-from ..services.store import CertificateNotFound, DuplicateCertificate
+from ..domain.errors import CertificateNotFound, DuplicateCertificate
 
 router = APIRouter(prefix="/store", tags=["Fuente de certificados"])
 

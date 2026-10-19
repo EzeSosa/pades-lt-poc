@@ -22,11 +22,15 @@ from typing import Literal
 
 from asn1crypto import x509 as asn1_x509
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
 
-from . import UnprocessableCertificate, UnprocessableInput
-from .certificates import _issued_by
-from .inspection import _is_ca, _load
+from ..application.ports import CertificateCodec
+from ..domain.certificates import Certificate
+from ..domain.errors import (
+    CertificateNotFound,
+    DuplicateCertificate,
+    UnprocessableCertificate,
+    UnprocessableInput,
+)
 
 SEED_DIR = Path(__file__).parent.parent / "seed"
 
@@ -62,14 +66,6 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
-class CertificateNotFound(Exception):
-    """No hay un certificado con ese id en la fuente."""
-
-
-class DuplicateCertificate(Exception):
-    """Todos los certificados recibidos ya estaban en la fuente."""
-
-
 @dataclass(frozen=True)
 class StoreSnapshot:
     """Lo que usa el validador, ya parseado. Sólo cuenta lo habilitado."""
@@ -84,14 +80,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _sha256(cert: x509.Certificate) -> str:
-    return cert.fingerprint(hashes.SHA256()).hex()
-
-
 class CertificateStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, codec: CertificateCodec) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.codec = codec
         # FastAPI atiende en varios hilos: una conexión compartida, serializada con un lock.
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -132,8 +125,8 @@ class CertificateStore:
         Sólo acepta CAs. Una raíz queda como ancla de confianza si `trusted`; un intermedio
         nunca. Devuelve los agregados y los que ya estaban; si ya estaban todos, falla.
         """
-        certs = _load(data)
-        not_ca = [c.subject.rfc4514_string() for c in certs if not _is_ca(c)]
+        certs = self.codec.parse(data)
+        not_ca = [c.subject for c in certs if not c.is_ca]
         if not_ca:
             raise UnprocessableCertificate(
                 f"La fuente sólo guarda raíces e intermedios (CAs), y esto no lo es: {'; '.join(not_ca)}"
@@ -141,7 +134,7 @@ class CertificateStore:
         added, present = [], []
         with self._lock, self._db:
             for cert in certs:
-                row = self._db.execute("SELECT * FROM certificates WHERE sha256 = ?", (_sha256(cert),)).fetchone()
+                row = self._db.execute("SELECT * FROM certificates WHERE sha256 = ?", (cert.sha256,)).fetchone()
                 if row is not None:
                     present.append(_row(row))
                     continue
@@ -185,30 +178,30 @@ class CertificateStore:
         """Inserta los de la carga inicial que falten. Va dentro de la transacción de quien llama."""
         added = []
         for name, notes in SEEDS.items():
-            cert = x509.load_der_x509_certificate((SEED_DIR / name).read_bytes())
-            exists = self._db.execute("SELECT 1 FROM certificates WHERE sha256 = ?", (_sha256(cert),)).fetchone()
+            [cert] = self.codec.parse((SEED_DIR / name).read_bytes())
+            exists = self._db.execute("SELECT 1 FROM certificates WHERE sha256 = ?", (cert.sha256,)).fetchone()
             if not exists:
                 added.append(self._insert(cert, trusted=True, notes=notes, origin="seed"))
         return added
 
-    def _insert(self, cert: x509.Certificate, *, trusted: bool, notes: str, origin: Origin) -> dict:
-        kind = "root" if _issued_by(cert, cert) else "intermediate"
+    def _insert(self, cert: Certificate, *, trusted: bool, notes: str, origin: Origin) -> dict:
+        kind = "root" if cert.self_signed else "intermediate"
         now = _now()
         cursor = self._db.execute(
             """INSERT INTO certificates (sha256, der, kind, trusted, enabled, origin, notes, subject, issuer,
                                          not_before, not_after, created_at, updated_at)
                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                _sha256(cert),
-                cert.public_bytes(serialization.Encoding.DER),
+                cert.sha256,
+                cert.der,
                 kind,
                 int(trusted and kind == "root"),
                 origin,
                 notes,
-                cert.subject.rfc4514_string(),
-                cert.issuer.rfc4514_string(),
-                cert.not_valid_before_utc.isoformat(),
-                cert.not_valid_after_utc.isoformat(),
+                cert.subject,
+                cert.issuer,
+                cert.not_before.isoformat(),
+                cert.not_after.isoformat(),
                 now,
                 now,
             ),

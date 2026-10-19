@@ -276,7 +276,7 @@ Consultado el 30/09/2026 con un certificado de Ciudadano Digital (CiDi, Córdoba
 
 Los números confirman lo de la sección anterior: la raíz, *offline*, publica una CRL chica y de larga duración; la CA operativa publica una CRL enorme y diaria, y ofrece OCSP para no obligar a descargarla.
 
-> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena (ver sección 10). `/verify` relaja la política de algoritmos débiles de pyHanko sólo para la clave de la AC Raíz (`LegacyRootsPolicy`): acepta SHA-1 en los certificados y CRLs que ella firma, y lo sigue rechazando en firmantes, TSAs y demás CAs. Un upgrade a LT de firmas de esta PKI necesitaría además incluir en el DSS el certificado del respondedor OCSP.
+> **SHA-1**: la AC Raíz firma con SHA-1 tanto a la CA de la ONTI como a su CRL. `cryptography` no verifica SHA-1 (`verify_directly_issued_by` lanza `Unsupported signature algorithm` y `is_signature_valid()` devuelve `False`), aunque verificadas a mano las firmas son correctas. `/certificates` lo resuelve para armar la cadena verificando la firma a mano (`issued_by` en `adapters/outbound/crypto/codec.py`; ver sección 10). `/verify` relaja la política de algoritmos débiles de pyHanko sólo para la clave de la AC Raíz (`LegacyRootsPolicy`): acepta SHA-1 en los certificados y CRLs que ella firma, y lo sigue rechazando en firmantes, TSAs y demás CAs. Un upgrade a LT de firmas de esta PKI necesitaría además incluir en el DSS el certificado del respondedor OCSP.
 
 ### Hard-fail y soft-fail
 
@@ -740,7 +740,7 @@ En la tab Certificados de la UI cada firma es una card con su cadena, con la del
 
 Recibe un certificado y lo describe campo por campo. Sirve para mirar los certificados que salen de `/certificates`, los que publica una CA por AIA o cualquier `.crt` suelto. No evalúa confianza ni revocación: sólo lee lo que dice el certificado.
 
-- **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa `_parse_certs`, el mismo parser de las descargas AIA. Si no es nada de eso, `422`.
+- **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa el parser de las descargas AIA (`parse_certs`, en `adapters/outbound/crypto/codec.py`). Si no es nada de eso, `422`.
 - **Sujeto y emisor**: atributo por atributo, en el orden del DER, con su OID. En la PKI argentina el CUIL/CUIT del titular va en `serialNumber` (`"CUIT 30680604572"`), y la tab Inspección de la UI lo destaca.
 - **`validity`**: `not_before`, `not_after`, `status` (`valid`, `expired`, `not_yet_valid`) y `days_left` respecto de la hora actual.
 - **`in_store`**: si el certificado ya está en la fuente de certificados. El reporte de inspección de la UI lo usa para ofrecer **Agregar a la fuente** a las CAs que no están: es el único lugar de la UI donde se dan altas, para que siempre se vea qué es el certificado antes de agregarlo.

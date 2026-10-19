@@ -59,3 +59,34 @@ name = "La lógica y la PKI no conocen la raíz de composición ni la configurac
 type = "forbidden"
 source_modules = ["pades_lt_poc.services", "pades_lt_poc.pki"]
 forbidden_modules = ["pades_lt_poc.bootstrap", "pades_lt_poc.config"]
+
+[[tool.importlinter.contracts]]
+name = "El dominio es Python puro"
+type = "forbidden"
+source_modules = ["pades_lt_poc.domain"]
+forbidden_modules = [
+    "pades_lt_poc.application", "pades_lt_poc.adapters", "pades_lt_poc.services", "pades_lt_poc.routers",
+    "pades_lt_poc.pki", "pades_lt_poc.bootstrap", "pades_lt_poc.config", "pades_lt_poc.app", "pades_lt_poc.dependencies",
+    "pyhanko", "pyhanko_certvalidator", "asn1crypto", "cryptography", "fastapi", "starlette", "uvicorn",
+    "requests", "aiohttp", "sqlite3",
+]
+
+[[tool.importlinter.contracts]]
+name = "La aplicación depende sólo del dominio"
+type = "forbidden"
+source_modules = ["pades_lt_poc.application"]
+forbidden_modules = [
+    "pades_lt_poc.adapters", "pades_lt_poc.services", "pades_lt_poc.routers",
+    "pades_lt_poc.pki", "pades_lt_poc.bootstrap", "pades_lt_poc.config", "pades_lt_poc.app", "pades_lt_poc.dependencies",
+    "pyhanko", "pyhanko_certvalidator", "asn1crypto", "cryptography", "fastapi", "starlette", "uvicorn",
+    "requests", "aiohttp", "sqlite3",
+]
+
+[[tool.importlinter.contracts]]
+name = "Los adaptadores de salida no conocen HTTP, la composición ni el código sin migrar"
+type = "forbidden"
+source_modules = ["pades_lt_poc.adapters.outbound"]
+forbidden_modules = [
+    "pades_lt_poc.services", "pades_lt_poc.routers", "pades_lt_poc.pki", "pades_lt_poc.bootstrap",
+    "pades_lt_poc.config", "pades_lt_poc.app", "pades_lt_poc.dependencies", "fastapi", "starlette", "uvicorn",
+]

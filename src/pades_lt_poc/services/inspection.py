@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -12,10 +11,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 
-from . import UnprocessableCertificate
-from .certificates import _issued_by, _parse_certs
+from ..adapters.outbound.crypto.codec import is_ca, issued_by, load_certs
 
-if TYPE_CHECKING:  # store importa de este módulo
+if TYPE_CHECKING:
     from .store import CertificateStore
 
 
@@ -29,26 +27,13 @@ class CertificateInspector:
         self.store = store
 
     def inspect(self, data: bytes) -> dict:
-        certs = _load(data)
+        certs = load_certs(data)
         now = datetime.now(UTC)
         in_store = self.store.snapshot().sha256 if self.store else frozenset()
         out = [_inspect(c, now) for c in certs]
         for cert in out:
             cert["in_store"] = cert["fingerprints"]["sha256"] in in_store
         return {"certificates": out}
-
-
-def _load(data: bytes) -> list[x509.Certificate]:
-    try:
-        return _parse_certs(data)
-    except ValueError:
-        pass
-    # Base64 pegado a mano (p. ej. el der_b64 de /certificates): sin encabezados ni saltos de línea fijos.
-    try:
-        der = base64.b64decode(b"".join(data.split()), validate=True)
-        return _parse_certs(der)
-    except (binascii.Error, ValueError):
-        raise UnprocessableCertificate("No es un certificado DER, PEM, PKCS#7 ni base64 de un DER") from None
 
 
 def _inspect(cert: x509.Certificate, now: datetime) -> dict:
@@ -62,8 +47,8 @@ def _inspect(cert: x509.Certificate, now: datetime) -> dict:
         "issuer": _name(cert.issuer),
         "subject_rfc4514": cert.subject.rfc4514_string(),
         "issuer_rfc4514": cert.issuer.rfc4514_string(),
-        "self_signed": _issued_by(cert, cert),
-        "is_ca": _is_ca(cert),
+        "self_signed": issued_by(cert, cert),
+        "is_ca": is_ca(cert),
         "validity": {
             "not_before": not_before.isoformat(),
             "not_after": not_after.isoformat(),
@@ -110,13 +95,6 @@ def _name(name: x509.Name) -> list[dict]:
 
 def _text(value: str | bytes) -> str:
     return value if isinstance(value, str) else value.hex()
-
-
-def _is_ca(cert: x509.Certificate) -> bool:
-    try:
-        return cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
-    except x509.ExtensionNotFound:
-        return False
 
 
 def _public_key(cert: x509.Certificate) -> dict:

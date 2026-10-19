@@ -110,10 +110,13 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad) y **paso 1** (configuración y raíz de composición). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición) y **paso 2** (modelo de dominio base y codec de certificados). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
+├── domain/           Python puro: el certificado de dominio y los errores de negocio
+├── application/      los puertos (Protocols) que necesitan los casos de uso
+├── adapters/         implementaciones de los puertos (hoy, el codec de certificados con cryptography)
 ├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
 ├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
 ├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
@@ -137,7 +140,7 @@ src/pades_lt_poc/
 └── static/           la UI: una página y un script por pantalla, ui.css, ui.js y un JS por tab (servidos en /ui/static)
 ```
 
-Los servicios lanzan `UnprocessablePdf` cuando el PDF no se puede procesar y `UnprocessableCertificate` cuando lo recibido no es un certificado. La app devuelve los dos como `422`.
+Los errores de negocio están en `domain/errors.py`: `UnprocessablePdf` cuando el PDF no se puede procesar y `UnprocessableCertificate` cuando lo recibido no es un certificado (la app devuelve los dos como `422`), `CertificateNotFound` (`404`) y `DuplicateCertificate` (`409`).
 
 ## Endpoints
 

@@ -2,13 +2,20 @@
 
 Este documento describe cómo está organizado el código, qué puede depender de qué y por qué. La decisión de fondo (arquitectura hexagonal, pyHanko como adaptador, contrato HTTP congelado) está en [ADR-0001](../adr/0001-arquitectura-hexagonal.md); los conceptos de firma digital, en [pades.md](../pades.md).
 
+| Documento | Contenido |
+|-----------|-----------|
+| [dominio.md](dominio.md) | Lenguaje ubicuo, modelos, reglas y errores del dominio |
+| [puertos.md](puertos.md) | El contrato de cada puerto de salida |
+| [adaptadores.md](adaptadores.md) | Cada adaptador: con qué biblioteca y qué resuelve |
+| [ADRs](../adr/README.md) | Las decisiones de arquitectura, con su contexto |
+
 > **Migración en curso.** La estructura objetivo está descripta en el ADR-0001. Este documento refleja lo que **ya existe** y se actualiza en cada paso. Estado de los pasos:
 >
 > | Paso | Contenido | Estado |
 > |------|-----------|--------|
 > | 0 | Red de seguridad: tests de contrato, suite de PDFs, reglas de dependencias | Hecho |
 > | 1 | Configuración y raíz de composición | Hecho |
-> | 2 | Modelo de dominio base y `CertificateCodec` | Pendiente |
+> | 2 | Modelo de dominio base y `CertificateCodec` | Hecho |
 > | 3 | Fuente de certificados | Pendiente |
 > | 4 | Certificados (extracción e inspección) | Pendiente |
 > | 5 | Validación | Pendiente |
@@ -20,6 +27,13 @@ Este documento describe cómo está organizado el código, qué puede depender d
 
 ```
 src/pades_lt_poc/
+├── domain/         Python puro: modelos, reglas y errores (dominio.md)
+│   ├── certificates.py   Certificate (sobre el DER), ValidityStatus, CaKind
+│   └── errors.py         errores de negocio
+├── application/      depende sólo del dominio
+│   └── ports.py          los puertos de salida (puertos.md)
+├── adapters/
+│   └── outbound/crypto/codec.py   CertificateCodec con cryptography (adaptadores.md)
 ├── config.py       Settings: la configuración, leída una vez del entorno
 ├── bootstrap.py    raíz de composición: build(settings) -> Services
 ├── app.py          create_app(settings): FastAPI, lifespan, routers y manejo de errores
@@ -37,7 +51,7 @@ create_app(settings)                       importar app.py no lee nada ni crea n
          └── bootstrap.build(settings) ──► Services
                ├── MiniPki(settings.pki_dir, settings.public_base_url).ensure()
                ├── crl_index.install()            (global de pyhanko-certvalidator, una vez)
-               ├── CertificateStore(settings.cert_store_db)
+               ├── CertificateStore(settings.cert_store_db, CryptographyCertificateCodec())
                ├── CrlCache()                     (uno por app)
                ├── load_tsa(pki), PdfSigner.from_pki(pki)
                ├── SignatureVerifier(store, [raíz de la PoC], fetchers con el CrlCache)
@@ -98,5 +112,10 @@ Se verifican en `tests/test_architecture.py` (import-linter, contratos en `[tool
 | `pki` no importa `services` | La PKI de prueba es el "mundo externo": no depende de quien la consume. |
 | `services` y `pki` no importan `bootstrap` ni `config` | Reciben lo que necesitan por parámetro; quién los arma y de dónde sale la configuración es asunto de la raíz de composición. |
 | Sólo `config.py` lee variables de entorno | Un solo lugar para saber qué se puede configurar. |
+| `domain` no importa ninguna otra capa del paquete ni pyHanko, asn1crypto, cryptography, FastAPI, Starlette, uvicorn, requests, aiohttp ni sqlite3 | El dominio es Python puro: se prueba sin infraestructura y no cambia cuando cambia una biblioteca. |
+| `application` sólo importa `domain` (y las mismas bibliotecas prohibidas) | Los casos de uso conocen a los adaptadores sólo por sus puertos. |
+| `adapters.outbound` no importa `services`, `routers`, `pki`, `bootstrap`, `config`, `app`, `dependencies` ni FastAPI | Un adaptador implementa un puerto y nada más: no sabe quién lo llama ni cómo se configura la app. |
+
+Mientras dure la migración, el código sin migrar (`services/`) sí puede usar adaptadores y el dominio: es el que se va vaciando paso a paso.
 
 Cada paso de la migración agrega las reglas de las capas que crea.

@@ -16,9 +16,11 @@ from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import DocumentSecurityStore
 
 from conftest import load_signer, pki, sign
+from pades_lt_poc.adapters.outbound.crypto.codec import CryptographyCertificateCodec
 from pades_lt_poc.services import store as store_module
 from pades_lt_poc.services.store import SEED_DIR, SEEDS, CertificateStore
 
+CODEC = CryptographyCertificateCodec()
 Enc = serialization.Encoding
 
 
@@ -66,12 +68,12 @@ def test_seed(client):
 
 def test_seed_runs_once_and_deletions_stick(tmp_path):
     path = tmp_path / "certs.db"
-    store = CertificateStore(path)
+    store = CertificateStore(path, CODEC)
     assert len(store.list()) == len(SEEDS)
     store.delete(store.list()[0]["id"])
     store.close()
 
-    reopened = CertificateStore(path)  # como al reiniciar la app
+    reopened = CertificateStore(path, CODEC)  # como al reiniciar la app
     assert len(reopened.list()) == len(SEEDS) - 1
     assert len(reopened.restore_seed()) == 1  # restaurar vuelve a agregar sólo lo que falta
     assert len(reopened.list()) == len(SEEDS)
@@ -82,7 +84,7 @@ def test_new_store_loads_once(tmp_path, monkeypatch):
     reloads = []
     reload = CertificateStore._reload
     monkeypatch.setattr(CertificateStore, "_reload", lambda self: (reloads.append(1), reload(self))[1])
-    store = CertificateStore(tmp_path / "certs.db")
+    store = CertificateStore(tmp_path / "certs.db", CODEC)
     assert len(reloads) == 1
     assert len(store.snapshot().sha256) == len(SEEDS)
     store.close()
@@ -103,13 +105,13 @@ def test_failed_seed_leaves_neither_certs_nor_mark(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store_module, "_now", dies_before_marking)
     with pytest.raises(RuntimeError):
-        CertificateStore(path)
+        CertificateStore(path, CODEC)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT COUNT(*) FROM certificates").fetchone() == (0,)
         assert db.execute("SELECT COUNT(*) FROM meta").fetchone() == (0,)
 
     monkeypatch.undo()
-    store = CertificateStore(path)
+    store = CertificateStore(path, CODEC)
     assert len(store.list()) == len(SEEDS)
     store.close()
 

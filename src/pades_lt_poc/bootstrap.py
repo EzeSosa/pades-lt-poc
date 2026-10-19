@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pyhanko.keys import load_cert_from_pemder
 from pyhanko.sign.timestamps import DummyTimeStamper
 
+from .adapters.outbound.crypto.codec import CryptographyCertificateCodec
 from .config import Settings
 from .pki import MiniPki
 from .services import crl_index
@@ -53,7 +54,7 @@ def build(settings: Settings) -> Services:
     # Es global al proceso (pyHanko no la recibe por parámetro) y vale con y sin conexión.
     crl_index.install()
 
-    store = CertificateStore(settings.cert_store_db)
+    store = CertificateStore(settings.cert_store_db, CryptographyCertificateCodec())
     # Las CRL descargadas se guardan entre verificaciones hasta su nextUpdate.
     crl_cache = CrlCache()
     poc_root = load_cert_from_pemder(str(pki.entity(pki.ROOT).cert_path))

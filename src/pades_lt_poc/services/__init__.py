@@ -1,20 +1,13 @@
-"""Lógica de cada operación, sin dependencias de HTTP. Los routers sólo traducen request/response."""
+"""Lógica de cada operación que todavía no se migró a casos de uso y adaptadores, sin dependencias de HTTP.
+
+Los errores de negocio están en `domain.errors`.
+"""
 
 from io import BytesIO
 
 from pyhanko.pdf_utils.reader import PdfFileReader
 
-
-class UnprocessableInput(Exception):
-    """La entrada no se puede procesar. La API lo devuelve como 422."""
-
-
-class UnprocessablePdf(UnprocessableInput):
-    """El PDF no se puede procesar (sin firmas, no se pudo firmar, etc.)."""
-
-
-class UnprocessableCertificate(UnprocessableInput):
-    """Lo recibido no es un certificado en un formato conocido."""
+from ..domain.errors import UnprocessablePdf
 
 
 def read_signed_pdf(data: bytes) -> PdfFileReader:

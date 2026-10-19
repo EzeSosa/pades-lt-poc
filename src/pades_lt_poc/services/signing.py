@@ -13,7 +13,7 @@ from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko_certvalidator import ValidationContext
 
 from ..pki import MiniPki
-from . import UnprocessablePdf
+from ..domain.errors import UnprocessablePdf
 
 
 class PdfSigner:
