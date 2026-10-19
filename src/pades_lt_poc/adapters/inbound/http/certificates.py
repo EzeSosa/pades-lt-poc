@@ -4,11 +4,11 @@ from datetime import datetime
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
-from ..application.use_cases.certificate_chains import SignatureChains
-from ..application.use_cases.inspect_certificates import InspectedCertificate
-from ..dependencies import ClockDep, ExtractCertificateChainsDep, InspectCertificatesDep
-from ..domain.chains import ChainLink, ChainResult
-from ..domain.signatures import SignatureKind
+from ....application.use_cases.certificate_chains import SignatureChains
+from ....application.use_cases.inspect_certificates import InspectedCertificate
+from ....domain.chains import ChainLink, ChainResult
+from ....domain.signatures import SignatureKind
+from .dependencies import ClockDep, ExtractCertificateChainsDep, InspectCertificatesDep
 
 router = APIRouter(tags=["Certificados"])
 

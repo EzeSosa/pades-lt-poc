@@ -2,8 +2,6 @@
 
 El paquete `pades_lt_poc.domain` contiene los modelos, las reglas y los errores de las operaciones de negocio. Es **Python puro**: no importa ninguna biblioteca de infraestructura ni otra capa del paquete (lo verifica el contrato "El dominio es Python puro" de import-linter). Por eso se prueba con datos armados a mano, sin PKI, sin red y sin PDFs.
 
-> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) las firmas de un PDF y sus cadenas (paso 4) la validación (paso 5) y la firma (paso 6). Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
-
 ## Lenguaje ubicuo
 
 Cómo se llama cada concepto en la documentación (castellano) y en el código (inglés). Las definiciones técnicas completas están en el [glosario de pades.md](../pades.md#12-glosario).
@@ -71,7 +69,7 @@ Tests: `tests/test_domain_certificates.py`.
 
 ## Errores (`domain/errors.py`)
 
-Los errores de negocio no saben de HTTP. El adaptador HTTP decide el status (hoy, el handler de `app.py` y los routers).
+Los errores de negocio no saben de HTTP. El adaptador HTTP decide el status (el handler de `app.py` y `adapters/inbound/http/store.py`). Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
 
 | Error | Cuándo | HTTP |
 |-------|--------|------|

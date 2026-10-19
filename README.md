@@ -89,7 +89,7 @@ uv run pytest
 
 Los tests generan su propia PKI en una carpeta temporal (no tocan `./pki`) y firman los PDFs en el mismo proceso con la TSA de la app, así que no hace falta tener el server levantado.
 
-Además de los tests de cada endpoint hay tres redes de seguridad, pensadas para la migración a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)):
+Además de los tests de cada capa ([docs/arquitectura/pruebas.md](docs/arquitectura/pruebas.md)) hay tres redes de seguridad:
 
 - **Contrato** (`tests/test_contract.py`): la respuesta JSON completa de cada endpoint en los casos clave, comparada contra `tests/golden/`. Lo que cambia en cada corrida (huellas, seriales y DER de la PKI de prueba, horas, ids, el puerto) se normaliza a marcadores como `<sha256:signer>` antes de comparar. Si un cambio de contrato es buscado, `UPDATE_GOLDEN=1 uv run pytest tests/test_contract.py` regenera los goldens; revisá el diff antes de commitear.
 - **Suite de PDFs** (`tests/test_pdf_suite.py`): los 40 casos de [testdata/pdf-suite](testdata/pdf-suite/README.md) contra `/sign` y `/verify`, con el mismo chequeo que `scripts/run_pdf_suite.py`. Tarda más de un minuto; `uv run pytest -m "not suite"` la saltea.
@@ -110,21 +110,19 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados), **paso 3** (fuente de certificados), **paso 4** (extracción e inspección de certificados), **paso 5** (validación), **paso 6** (firma) y **paso 7** (testbed fuera del núcleo). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
+Arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)): las reglas de negocio están en un dominio de Python puro, los casos de uso usan el exterior sólo a través de puertos, y pyHanko, `cryptography`, SQLite y HTTP son adaptadores. El detalle (capas, reglas de dependencias, cada caso de uso, puerto y adaptador, y el catálogo de reglas de negocio) está en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
 ├── domain/           Python puro: certificado, firmas de un PDF, cadenas, validación, firma, fuente de certificados, reglas y errores
 ├── application/      los puertos (Protocols) y los casos de uso: firma (/sign), validación (/verify), fuente (/store), cadenas (/certificates) e inspección
-├── adapters/         implementaciones de los puertos: firma, validación y lectura de PDFs (pyHanko), codec (cryptography), fuente (SQLite), AIA (requests), carga inicial, reloj
-├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
-├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
-├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
-├── dependencies.py   inyecta en los endpoints los servicios de app.state.services
-├── routers/          endpoints HTTP, uno por área: validan la entrada y delegan
-│   ├── signing.py  verification.py  certificates.py  store.py
-│   └── ui.py             sirve las páginas de /ui
+├── adapters/
+│   ├── inbound/http/ la API: endpoints por área con sus presenters, inyección de dependencias y la UI (/ui)
+│   └── outbound/     implementaciones de los puertos: firma, validación y lectura de PDFs (pyHanko), codec (cryptography), fuente (SQLite), AIA (requests), carga inicial, reloj
 ├── testbed/          el mundo externo simulado: la mini PKI, el OCSP y la TSA, con sus endpoints (/pki, /ocsp, /tsa)
+├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
+├── bootstrap.py      raíz de composición: crea los adaptadores y los conecta con los casos de uso (en el lifespan)
+├── app.py            create_app(): FastAPI, lifespan, endpoints y manejo de errores
 ├── seed/             la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
 └── static/           la UI: una página y un script por pantalla, ui.css, ui.js y un JS por tab (servidos en /ui/static)
 ```

@@ -1,10 +1,8 @@
 # Adaptadores
 
-Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`adapters/outbound/`) implementan los [puertos](puertos.md) con una biblioteca concreta. Los **de entrada** (por ahora, los `routers/` de FastAPI) traducen un pedido externo a un caso de uso.
+Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`adapters/outbound/`) implementan los [puertos](puertos.md) con una biblioteca concreta. Los **de entrada** (`adapters/inbound/http/`, la API de FastAPI) traducen un pedido externo a un caso de uso.
 
-Un adaptador de salida no conoce los endpoints, ni la raíz de composición, ni el testbed. Lo verifica el contrato "Los adaptadores de salida no conocen HTTP entrante, la composición ni el testbed" de import-linter.
-
-> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) el de la validación (paso 5) y el de la firma (paso 6).
+Un adaptador de salida no conoce a los de entrada, ni la raíz de composición, ni el testbed. Lo verifica el contrato "Los adaptadores de salida no conocen los de entrada, la composición ni el testbed" de import-linter.
 
 ## `adapters/outbound/crypto/codec.py`: certificados con `cryptography`
 
@@ -173,3 +171,26 @@ Implementa [`PdfSigningEngine`](puertos.md#pdfsigningengine) con `PyHankoPdfSign
 - **Nombres de campo** (`field_names`): recorre `/AcroForm /Fields` y sus `/Kids`, armando el nombre completo de cada campo con `/T`.
 
 Tests: `tests/test_sign.py` (por HTTP contra la app escuchando en un puerto real), golden `sign_b_lt`, la suite de PDFs (con el canario de S-03).
+
+## `adapters/inbound/http/`: la API
+
+El adaptador de entrada: traduce un pedido HTTP a un caso de uso y el resultado a JSON. No conoce a los adaptadores de salida, ni la raíz de composición, ni el testbed (contrato "Los adaptadores de entrada conocen los casos de uso, ..." de import-linter).
+
+| Módulo | Endpoints | Caso de uso |
+|--------|-----------|-------------|
+| `signing.py` | `POST /sign` | `SignPdf` |
+| `verification.py` | `POST /verify` | `VerifySignatures` |
+| `certificates.py` | `POST /certificates`, `POST /certificates/inspect` | `ExtractCertificateChains`, `InspectCertificates` |
+| `store.py` | `/store/certificates*` | `CertificateSource` |
+| `ui.py` | `/ui/firmas`, `/ui/certificado`, `/ui/fuente`, `/ui/static` | — (páginas estáticas que llaman a la API) |
+| `dependencies.py` | — | Inyecta cada caso de uso (y el `Clock`) desde `app.state.services`. No importa `bootstrap`. |
+
+Cada módulo de endpoints:
+
+- **Valida la entrada propia de HTTP**: los valores de las opciones (`Literal`, 422 de FastAPI), que venga uno solo de `crt` o `b64`, los archivos subidos.
+- **Llama al caso de uso**, fuera del event loop (`run_in_threadpool`) si bloquea (`ExtractCertificateChains`, `CertificateSource.add`) o con `await` si es async (`SignPdf`, `VerifySignatures`).
+- **Arma el JSON con presenters** (`present_*`): funciones puras que convierten los modelos del dominio en la respuesta, con los mismos campos y formatos que tenía la API antes de la migración (lo fijan los tests de contrato). Las horas se calculan con el `Clock` de la app donde hace falta (la vigencia en `/store` y `/certificates/inspect`).
+
+Errores: `app.py` convierte `UnprocessableInput` (y sus subclases) en 422 con `{"detail": mensaje}`; `store.py` convierte `CertificateNotFound` en 404 y `DuplicateCertificate` en 409, con sus propios mensajes.
+
+Los endpoints del testbed (`/pki`, `/ocsp`, `/tsa`) no están acá: son parte del testbed (`testbed/http.py`, ADR-0003).

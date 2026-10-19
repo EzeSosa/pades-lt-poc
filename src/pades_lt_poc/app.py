@@ -25,7 +25,7 @@ Estructura:
   domain/       Python puro: modelos y reglas de negocio
   application/  casos de uso y los puertos que necesitan
   adapters/     implementaciones de los puertos (pyHanko, cryptography, SQLite, HTTP)
-  routers/      endpoints HTTP de las operaciones de negocio
+  adapters/inbound/http/  endpoints HTTP de las operaciones de negocio, con sus presenters
   testbed/      la PKI, el OCSP y la TSA de la PoC, con sus endpoints (/pki, /ocsp, /tsa)
   seed/         la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
   static/       las páginas de /ui, su CSS y un JS por tab (servidos en /ui/static)
@@ -42,7 +42,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from . import bootstrap
 from .application.ports import Clock, IssuerFetcher
 from .config import Settings
-from .routers import certificates, signing, store, ui, verification
+from .adapters.inbound.http import certificates, signing, store, ui, verification
 from .testbed import Testbed
 from .testbed.http import create_router as testbed_router
 from .domain.errors import UnprocessableInput

@@ -6,10 +6,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..dependencies import CertificateSourceDep, ClockDep
-from ..domain.certificates import CaKind
-from ..domain.errors import CertificateNotFound, DuplicateCertificate
-from ..domain.source import EntryChanges, Origin, StoredCertificate
+from ....domain.certificates import CaKind
+from ....domain.errors import CertificateNotFound, DuplicateCertificate
+from ....domain.source import EntryChanges, Origin, StoredCertificate
+from .dependencies import CertificateSourceDep, ClockDep
 
 router = APIRouter(prefix="/store", tags=["Fuente de certificados"])
 

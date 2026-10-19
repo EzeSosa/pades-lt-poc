@@ -2,7 +2,7 @@
 
 Las reglas de negocio que la arquitectura protege, con un id estable. El id se cita en el código (docstrings y comentarios) y en los tests, así que se puede ir en los dos sentidos: de una regla a dónde se aplica y quién la prueba, y de un `F-02` en el código a su explicación.
 
-Cada regla tiene un **estado de migración**:
+Cada regla dice **dónde vive**:
 
 - **Dominio**: la regla vive en `domain/` y tiene tests puros, sin PKI ni red.
 - **Caso de uso**: la regla la orquesta un caso de uso de `application/`, probado con fakes.

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 # Páginas estáticas que llaman a la API desde el navegador. Su CSS y JS se sirven en
 # /ui/static (montado en app.py).
-STATIC_DIR = Path(__file__).parent.parent / "static"
+STATIC_DIR = Path(__file__).parents[3] / "static"
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 

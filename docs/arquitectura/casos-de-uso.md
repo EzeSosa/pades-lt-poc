@@ -1,8 +1,6 @@
 # Casos de uso
 
-Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, aplica las reglas del [dominio](dominio.md) y usa el exterior sólo a través de [puertos](puertos.md). Están en `application/use_cases/` y no saben de HTTP: los endpoints de `routers/` traducen el pedido, llaman al caso de uso y arman la respuesta (presenters).
-
-> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) la extracción e inspección de certificados (paso 4) la validación (paso 5) y la firma (paso 6).
+Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, aplica las reglas del [dominio](dominio.md) y usa el exterior sólo a través de [puertos](puertos.md). Están en `application/use_cases/` y no saben de HTTP: los endpoints de `adapters/inbound/http/` traducen el pedido, llaman al caso de uso y arman la respuesta (presenters).
 
 | Caso de uso | Endpoints | Puertos |
 |-------------|-----------|---------|
@@ -40,7 +38,7 @@ Las horas (`created_at`, `updated_at`) salen del `Clock`. El repositorio las gua
 
 ```mermaid
 sequenceDiagram
-    participant R as routers/store.py
+    participant R as adapters/inbound/http/store.py
     participant S as CertificateSource
     participant C as CertificateCodec
     participant D as domain/source.py
@@ -83,7 +81,7 @@ La carga inicial pide `trusted=True` para todos sus certificados; F-02 hace que 
 
 ### Presentación (HTTP)
 
-`routers/store.py` arma el JSON con `present(entrada, now)`: los campos del certificado (`sha256`, `subject`, `issuer`, `not_before`, `not_after`, `der_b64`), los de la entrada (`id`, `kind`, `trusted`, `enabled`, `origin`, `notes`, `created_at`, `updated_at`) y `validity_status`, que se calcula con la hora del `Clock` de la app. El router también resuelve lo que es propio de HTTP: exigir uno solo de `crt` o `b64`, y llevar el alta fuera del event loop (`run_in_threadpool`), porque bloquea.
+`adapters/inbound/http/store.py` arma el JSON con `present(entrada, now)`: los campos del certificado (`sha256`, `subject`, `issuer`, `not_before`, `not_after`, `der_b64`), los de la entrada (`id`, `kind`, `trusted`, `enabled`, `origin`, `notes`, `created_at`, `updated_at`) y `validity_status`, que se calcula con la hora del `Clock` de la app. El router también resuelve lo que es propio de HTTP: exigir uno solo de `crt` o `b64`, y llevar el alta fuera del event loop (`run_in_threadpool`), porque bloquea.
 
 Tests: `tests/test_certificate_source.py` (con fakes), `tests/test_store.py` (por HTTP), goldens `store_*`.
 
@@ -110,7 +108,7 @@ El sello de una firma se analiza sólo si la firma verifica (C-01): si el docume
 
 ```mermaid
 sequenceDiagram
-    participant R as routers/certificates.py
+    participant R as adapters/inbound/http/certificates.py
     participant U as ExtractCertificateChains
     participant P as SignedPdfReader
     participant S as CertificateSource
@@ -136,7 +134,7 @@ sequenceDiagram
 
 ### Presentación (HTTP)
 
-`routers/certificates.py::present_signature` arma, por firma, `field`, `type` y los campos de la cadena: `crypto_valid`, `intact`, `valid` y, si no verifica, `error` y `certificates: null`; si verifica, `chain_complete`, `certificates` y, si hubo, `aia_errors`. Las firmas (no los DocTimeStamp) llevan además `signature_timestamp` (`null` si no tiene o si la firma no verifica). Cada certificado: `type` (`end_entity` en la posición 0, `root` si es autofirmado, si no `intermediate`), `source`, `self_signed`, `subject`, `issuer`, `serial_number` (hex), vigencia, `sha256_fingerprint`, `der_b64` e `in_store`.
+`adapters/inbound/http/certificates.py::present_signature` arma, por firma, `field`, `type` y los campos de la cadena: `crypto_valid`, `intact`, `valid` y, si no verifica, `error` y `certificates: null`; si verifica, `chain_complete`, `certificates` y, si hubo, `aia_errors`. Las firmas (no los DocTimeStamp) llevan además `signature_timestamp` (`null` si no tiene o si la firma no verifica). Cada certificado: `type` (`end_entity` en la posición 0, `root` si es autofirmado, si no `intermediate`), `source`, `self_signed`, `subject`, `issuer`, `serial_number` (hex), vigencia, `sha256_fingerprint`, `der_b64` e `in_store`.
 
 Tests: `tests/test_extract_chains.py` (con fakes), `tests/test_certificates.py` (por HTTP), goldens `certificates_*`.
 
@@ -168,7 +166,7 @@ Tests: `tests/test_inspection.py` (por HTTP), goldens `inspect_*`.
 
 ```mermaid
 sequenceDiagram
-    participant R as routers/verification.py
+    participant R as adapters/inbound/http/verification.py
     participant U as VerifySignatures
     participant S as CertificateSource
     participant D as domain/verification.py
@@ -202,7 +200,7 @@ La hora declarada sólo se lee si se pidió validar a esa hora.
 
 ### Presentación (HTTP)
 
-`routers/verification.py::present_report` arma el JSON:
+`adapters/inbound/http/verification.py::present_report` arma el JSON:
 
 | Campo | De dónde sale |
 |-------|---------------|
@@ -228,7 +226,7 @@ Tests: `tests/test_verify_signatures.py` (con un validador falso), `tests/test_v
 
 ```mermaid
 sequenceDiagram
-    participant R as routers/signing.py
+    participant R as adapters/inbound/http/signing.py
     participant U as SignPdf
     participant E as PdfSigningEngine
     participant D as domain/signing.py
@@ -247,6 +245,6 @@ El rechazo de un PDF cifrado va **antes** de leer su formulario: en un PDF cifra
 
 ### Presentación (HTTP)
 
-`routers/signing.py` arma la URL de la TSA con la URL del pedido (`<base_url>/tsa`): la app se pide el sello a sí misma por HTTP, como si la TSA fuera externa. Devuelve el PDF con `Content-Disposition: attachment` y el nombre subido más `-pades-lt.pdf`: `filename*` en UTF-8 (RFC 6266) y un `filename` ASCII para clientes viejos (`content_disposition`, que es HTTP y no del dominio).
+`adapters/inbound/http/signing.py` arma la URL de la TSA con la URL del pedido (`<base_url>/tsa`): la app se pide el sello a sí misma por HTTP, como si la TSA fuera externa. Devuelve el PDF con `Content-Disposition: attachment` y el nombre subido más `-pades-lt.pdf`: `filename*` en UTF-8 (RFC 6266) y un `filename` ASCII para clientes viejos (`content_disposition`, que es HTTP y no del dominio).
 
 Tests: `tests/test_domain_signing.py` (con un motor falso), `tests/test_sign.py` (por HTTP), golden `sign_*`, la suite de PDFs.

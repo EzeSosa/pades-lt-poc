@@ -3,8 +3,8 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 
-from ..dependencies import SignPdfDep
-from ..domain.signing import SignRequest
+from ....domain.signing import SignRequest
+from .dependencies import SignPdfDep
 
 router = APIRouter(tags=["Firma"])
 

@@ -4,8 +4,6 @@ Los puertos de salida son lo que los casos de uso necesitan del exterior. Están
 
 Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores lanza, si hace E/S y si bloquea. Una implementación nueva tiene que cumplirlo entero, y los tests del adaptador lo verifican.
 
-> Este documento crece con la migración. Hoy tiene `CertificateCodec` (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) el de la validación (paso 5) y el de la firma (paso 6).
-
 | Puerto | Implementaciones | Lo usa |
 |--------|------------------|--------|
 | [`CertificateCodec`](#certificatecodec) | `CryptographyCertificateCodec` | `CertificateSource`, `ExtractCertificateChains`, `InspectCertificates`, `SqliteCertificateRepository`, `PyHankoSignedPdfReader` |
@@ -15,7 +13,7 @@ Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores 
 | [`PdfSigningEngine`](#pdfsigningengine) | `PyHankoPdfSigner`; `FakeEngine` (tests) | `SignPdf` |
 | [`CertificateRepository`](#certificaterepository) | `SqliteCertificateRepository`; `InMemoryCertificateRepository` (tests) | `CertificateSource` |
 | [`SeedCatalog`](#seedcatalog) | `PackagedSeedCatalog`; `StaticSeedCatalog` (tests) | `CertificateSource` |
-| [`Clock`](#clock) | `SystemClock`; `FixedClock` y `TestClock` (tests) | `CertificateSource`, `VerifySignatures`, `routers/store.py`, `routers/certificates.py` |
+| [`Clock`](#clock) | `SystemClock`; `FixedClock` y `TestClock` (tests) | `CertificateSource`, `VerifySignatures`, `adapters/inbound/http/store.py`, `adapters/inbound/http/certificates.py` |
 
 Los fakes de los tests están en `tests/fakes.py` (y `TestClock` en `tests/conftest.py`; `FakeReader` y `FakeFetcher` en `tests/test_extract_chains.py`; `FakeValidator` en `tests/test_verify_signatures.py`; `FakeEngine` en `tests/test_domain_signing.py`).
 

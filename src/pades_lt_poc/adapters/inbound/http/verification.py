@@ -2,9 +2,8 @@ from typing import Literal
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from ..dependencies import VerifySignaturesDep
-from ..domain.certificates import Certificate
-from ..domain.verification import (
+from ....domain.certificates import Certificate
+from ....domain.verification import (
     DiffPolicyMode,
     FetchedRevocation,
     PathAttempt,
@@ -15,6 +14,7 @@ from ..domain.verification import (
     VerificationOptions,
     VerificationReport,
 )
+from .dependencies import VerifySignaturesDep
 
 router = APIRouter(tags=["Verificación"])
 

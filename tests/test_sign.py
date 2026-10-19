@@ -14,7 +14,7 @@ from pyhanko.pdf_utils.writer import copy_into_new_writer
 from pyhanko.sign import fields
 
 from conftest import load_signer, sign
-from pades_lt_poc.routers.signing import content_disposition
+from pades_lt_poc.adapters.inbound.http.signing import content_disposition
 from pades_lt_poc.adapters.outbound.pyhanko.signer import field_names as form_field_names
 from pades_lt_poc.domain.signing import free_field_name
 
