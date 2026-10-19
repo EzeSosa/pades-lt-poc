@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from asn1crypto import x509 as asn1_x509
-from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.diff_analysis import DEFAULT_DIFF_POLICY, StandardDiffPolicy, SuspiciousModification
 from pyhanko.sign.validation import DocumentSecurityStore, async_validate_pdf_signature
@@ -20,10 +19,7 @@ from pyhanko_certvalidator.fetchers import FetcherBackend, Fetchers
 from pyhanko_certvalidator.path import ValidationPath
 from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowWeakAlgorithmsPolicy
 
-from .. import pki
 from . import UnprocessableInput, read_signed_pdf
-from . import crl_index
-from .fetching import RevocationFetcherBackend
 from .store import CertificateStore, StoreSnapshot
 from .trust_problems import diagnose
 
@@ -128,18 +124,11 @@ class SignatureVerifier:
         self,
         store: CertificateStore,
         own_roots: list[asn1_x509.Certificate],
-        fetcher_backend: Callable[[], FetcherBackend] = RevocationFetcherBackend,
+        fetcher_backend: Callable[[], FetcherBackend],
     ) -> None:
         self.store = store
         self.own_roots = own_roots
         self.fetcher_backend = fetcher_backend
-        # Buscar un serial en una CRL grande (la de la ONTI) recorriéndola en Python tarda
-        # segundos: se usa un índice armado con `cryptography` (ver crl_index).
-        crl_index.install()
-
-    @classmethod
-    def from_pki(cls, store: CertificateStore) -> SignatureVerifier:
-        return cls(store, [load_cert_from_pemder(str(pki.entity(pki.ROOT).cert_path))])
 
     def trust_roots(self, snapshot: StoreSnapshot | None = None) -> list[asn1_x509.Certificate]:
         """La raíz de la PoC y las raíces confiables habilitadas de la fuente.

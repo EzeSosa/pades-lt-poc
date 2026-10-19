@@ -42,7 +42,7 @@ class CachedCrl:
 
 
 class CrlCache:
-    """Las CRL descargadas, por URL, hasta su `nextUpdate`. Una por proceso (`CRL_CACHE`)."""
+    """Las CRL descargadas, por URL, hasta su `nextUpdate`. La raíz de composición crea una por app."""
 
     def __init__(self, max_entries: int = MAX_CACHED_CRLS) -> None:
         self.max_entries = max_entries
@@ -75,9 +75,6 @@ class CrlCache:
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
-
-
-CRL_CACHE = CrlCache()
 
 
 class _TimeoutAsFetchError:
@@ -138,9 +135,10 @@ class _CertificateFetcher(_TimeoutAsFetchError, AIOHttpCertificateFetcher):
 class RevocationFetcherBackend(FetcherBackend):
     """Un juego de fetchers con una sesión HTTP propia, que se cierra al salir del `async with`."""
 
-    def __init__(self, timeout: float = TIMEOUT, crl_timeout: float = CRL_TIMEOUT, crl_cache: CrlCache = CRL_CACHE) -> None:
+    def __init__(self, timeout: float = TIMEOUT, crl_timeout: float = CRL_TIMEOUT, crl_cache: CrlCache | None = None) -> None:
         self.session = LazySession()
-        self.timeout, self.crl_timeout, self.crl_cache = timeout, crl_timeout, crl_cache
+        self.timeout, self.crl_timeout = timeout, crl_timeout
+        self.crl_cache = crl_cache if crl_cache is not None else CrlCache()  # sin caché compartido: uno propio
 
     def get_fetchers(self) -> Fetchers:
         return Fetchers(

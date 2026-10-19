@@ -25,24 +25,24 @@ def verify(client, pdf: bytes, **data):
 
 
 # --------------------------------------------------------------------------- anclas
-def test_verify_trusts_poc_root_and_both_ac_raiz(client):
+def test_verify_trusts_poc_root_and_both_ac_raiz(services):
     """La raíz de la PoC es implícita; las AC Raíz vienen de la carga inicial de la fuente."""
-    roots = [c.dump() for c in client.app.state.verifier.trust_roots()]
-    assert roots[0] == client.app.state.signer.trust_root.dump()
+    roots = [c.dump() for c in services.verifier.trust_roots()]
+    assert roots[0] == services.signer.trust_root.dump()
     assert AC_RAIZ_2007.dump() in roots
     assert AC_RAIZ_2016.dump() in roots
     assert ONTI.dump() not in roots  # un intermedio nunca es ancla de confianza
 
 
-def test_sha1_exemption_only_for_roots_born_with_sha1(client):
+def test_sha1_exemption_only_for_roots_born_with_sha1(services):
     """La de 2007 firma con SHA-1; la de 2016, con SHA-512, no necesita la excepción."""
-    legacy = client.app.state.verifier.algorithm_policy()._legacy_keys
+    legacy = services.verifier.algorithm_policy()._legacy_keys
     assert legacy == {AC_RAIZ_2007.public_key.dump()}
 
 
-def test_verify_uses_trust_roots(client, pdf, monkeypatch):
+def test_verify_uses_trust_roots(client, services, pdf, monkeypatch):
     """verify() arma las anclas con trust_roots(): lo que prueban los tests de anclas es lo que valida."""
-    verifier = client.app.state.verifier
+    verifier = services.verifier
     monkeypatch.setattr(verifier, "trust_roots", lambda snapshot=None: [])
     [sig] = verify(client, sign(pdf, load_signer())).json()["signatures"]
     assert sig["trust_problem"]["reason"] == "no_path"

@@ -110,13 +110,15 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Estado: **paso 0, red de seguridad** (tests de contrato, suite de PDFs y reglas de dependencias). Todavía no se movió código: la estructura de abajo es la vigente.
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad) y **paso 1** (configuración y raíz de composición). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
-├── app.py            crea la app: lifespan (PKI + servicios), routers y manejo de errores
-├── dependencies.py   inyecta en los endpoints los servicios creados en el lifespan
-├── pki.py            la mini PKI: certificados, CRLs, OCSP y revocación
+├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
+├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
+├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
+├── dependencies.py   inyecta en los endpoints los servicios de app.state.services
+├── pki.py            MiniPki: la mini PKI de una carpeta y una URL base (certificados, CRLs, OCSP, revocación)
 ├── routers/          endpoints HTTP, uno por área: validan la entrada y delegan
 │   ├── pki.py  ocsp.py  tsa.py
 │   ├── signing.py  verification.py  certificates.py  store.py

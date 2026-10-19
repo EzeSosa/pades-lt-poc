@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from conftest import doc_timestamp, load_signer, sign
+from conftest import doc_timestamp, load_signer, pki, sign
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -25,7 +25,6 @@ from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.generic_cms import extract_tst_data_iter
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-from pades_lt_poc import pki
 from pades_lt_poc.services import certificates as certificates_service
 from pades_lt_poc.services.certificates import _extract_chain, _issued_by, _parse_certs
 from pades_lt_poc.services.store import SEED_DIR

@@ -15,8 +15,7 @@ from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import DocumentSecurityStore
 
-from conftest import load_signer, sign
-from pades_lt_poc import pki
+from conftest import load_signer, pki, sign
 from pades_lt_poc.services import store as store_module
 from pades_lt_poc.services.store import SEED_DIR, SEEDS, CertificateStore
 
@@ -24,10 +23,10 @@ Enc = serialization.Encoding
 
 
 @pytest.fixture(autouse=True)
-def reset_store(client):
+def reset_store(services):
     """El cliente es de sesión: cada test deja la fuente como la carga inicial."""
     yield
-    store = client.app.state.store
+    store = services.store
     for cert in store.list():
         store.delete(cert["id"])
     store.restore_seed()
@@ -167,8 +166,8 @@ def test_add_rejects_end_entity_and_garbage(client):
 
 
 # --------------------------------------------------------------------------- modificaciones y bajas
-def test_disable_and_untrust_take_effect_immediately(client):
-    verifier = client.app.state.verifier
+def test_disable_and_untrust_take_effect_immediately(client, services):
+    verifier = services.verifier
     root_2016 = load_cert_from_pemder(str(SEED_DIR / "ac-raiz-argentina-2016.der"))
     entry = next(c for c in listing(client, kind="root")["certificates"] if c["sha256"] == root_2016.sha256.hex())
 

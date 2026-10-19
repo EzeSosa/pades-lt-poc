@@ -12,7 +12,7 @@ from pyhanko.sign import fields, signers
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko_certvalidator import ValidationContext
 
-from .. import pki
+from ..pki import MiniPki
 from . import UnprocessablePdf
 
 
@@ -24,7 +24,7 @@ class PdfSigner:
         self.trust_root = trust_root  # ancla de confianza para firmar
 
     @classmethod
-    def from_pki(cls) -> PdfSigner:
+    def from_pki(cls, pki: MiniPki) -> PdfSigner:
         signer = signers.SimpleSigner.load(
             key_file=str(pki.entity(pki.SIGNER).key_path),
             cert_file=str(pki.entity(pki.SIGNER).cert_path),

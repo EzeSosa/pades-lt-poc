@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
-from pades_lt_poc import pki
+from conftest import pki
 from pades_lt_poc.services.store import SEED_DIR
 
 Enc = serialization.Encoding

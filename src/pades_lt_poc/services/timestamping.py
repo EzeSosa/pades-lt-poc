@@ -4,10 +4,10 @@ from pyhanko.keys import load_cert_from_pemder, load_private_key_from_pemder
 from pyhanko.sign.timestamps import DummyTimeStamper
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-from .. import pki
+from ..pki import MiniPki
 
 
-def load_tsa() -> DummyTimeStamper:
+def load_tsa(pki: MiniPki) -> DummyTimeStamper:
     """El "motor" de la TSA: pyHanko ya trae un emisor de tokens RFC 3161.
 
     La app lo expone por HTTP en /tsa para que la firma lo consuma como si

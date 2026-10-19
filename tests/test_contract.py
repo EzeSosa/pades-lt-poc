@@ -29,9 +29,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from pyhanko.pdf_utils.reader import PdfFileReader
 
-from conftest import doc_timestamp, load_signer, sign
-from pades_lt_poc import pki
-from pades_lt_poc.services.fetching import CRL_CACHE
+from conftest import doc_timestamp, load_signer, pki, sign
 from pades_lt_poc.services.store import SEED_DIR, SEEDS
 from test_store import pdf_without_intermediate
 from test_verify import with_free_entry
@@ -52,7 +50,7 @@ def _aliases() -> dict[str, str]:
     """Valor variable -> marcador estable, para cada certificado de la PKI y de la carga inicial."""
     certs = {name: pki.entity(name).cert() for name in PKI_NAMES}
     certs |= {f"seed-{Path(f).stem}": x509.load_der_x509_certificate((SEED_DIR / f).read_bytes()) for f in SEEDS}
-    out: dict[str, str] = {pki.BASE_URL: "<base_url>"}  # un puerto libre distinto en cada corrida
+    out: dict[str, str] = {pki.base_url: "<base_url>"}  # un puerto libre distinto en cada corrida
     for name, cert in certs.items():
         der = cert.public_bytes(serialization.Encoding.DER)
         out[cert.fingerprint(hashes.SHA256()).hex()] = f"<sha256:{name}>"
@@ -110,7 +108,7 @@ def check(client):
         text = json.dumps(actual, ensure_ascii=False, indent=2) + "\n"
         if UPDATE or not path.exists():
             GOLDEN_DIR.mkdir(exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            path.write_text(text, encoding="utf-8", newline="\n")
             if not UPDATE:
                 pytest.fail(f"no había golden para {name}: se grabó {path.name}, revisalo y volvé a correr")
             return
@@ -121,15 +119,15 @@ def check(client):
 
 
 @pytest.fixture(autouse=True)
-def fresh_state(client):
+def fresh_state(client, services):
     """La fuente queda como la carga inicial y el caché de CRLs vacío, antes y después de cada caso."""
 
     def reset():
-        store = client.app.state.store
+        store = services.store
         for cert in store.list():
             store.delete(cert["id"])
         store.restore_seed()
-        CRL_CACHE.clear()
+        services.crl_cache.clear()
         pki.unrevoke_all()
 
     reset()

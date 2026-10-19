@@ -2,14 +2,34 @@
 Fixtures compartidas. Los PDFs se firman en el mismo proceso con pyHanko (y la
 TSA de la app, sin HTTP), porque /sign necesita que la app se consulte a sí misma
 por red y TestClient no expone un puerto real.
+
+La app se crea con un `Settings` propio: la PKI y la fuente de los tests viven en una
+carpeta temporal (no tocan ./pki ni ./certs.db), y las URLs de CRL y OCSP de la PKI de
+prueba apuntan a un puerto libre, donde `pki_server` sirve la app para el modo con
+conexión de /verify y para /sign.
 """
 
-import os
 import shutil
 import socket
 import tempfile
 import threading
 import time
+from io import BytesIO
+from pathlib import Path
+
+import pytest
+import requests
+import uvicorn
+from demo import minimal_pdf
+from fastapi.testclient import TestClient
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.sign import fields, signers
+from pyhanko.sign.signers.pdf_signer import PdfTimeStamper
+
+from pades_lt_poc.app import create_app
+from pades_lt_poc.config import Settings
+from pades_lt_poc.pki import MiniPki
+from pades_lt_poc.services import certificates as certificates_service
 
 
 def _free_port() -> int:
@@ -18,30 +38,17 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-# Antes de importar la app: pki.PKI_DIR, pki.BASE_URL y store.DB_PATH se leen al importar
-# los módulos, y los tests no deben tocar la PKI de ./pki ni la fuente de ./certs.db. Las
-# URLs de CRL y OCSP de la PKI de prueba apuntan a un puerto libre, donde `pki_server`
-# sirve la app para el modo con conexión de /verify.
-_PKI_DIR = tempfile.mkdtemp(prefix="pades-test-pki-")
+_PKI_DIR = Path(tempfile.mkdtemp(prefix="pades-test-pki-"))
 _PORT = _free_port()
-os.environ["PKI_DIR"] = _PKI_DIR
-os.environ["CERT_STORE_DB"] = os.path.join(_PKI_DIR, "certs.db")
-os.environ["PUBLIC_BASE_URL"] = f"http://127.0.0.1:{_PORT}"
-
-from io import BytesIO  # noqa: E402
-
-import pytest  # noqa: E402
-import requests  # noqa: E402
-from demo import minimal_pdf  # noqa: E402
-import uvicorn  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter  # noqa: E402
-from pyhanko.sign import fields, signers  # noqa: E402
-from pyhanko.sign.signers.pdf_signer import PdfTimeStamper  # noqa: E402
-
-from pades_lt_poc import pki  # noqa: E402
-from pades_lt_poc.app import app  # noqa: E402
-from pades_lt_poc.services import certificates as certificates_service  # noqa: E402
+SETTINGS = Settings(
+    pki_dir=_PKI_DIR,
+    public_base_url=f"http://127.0.0.1:{_PORT}",
+    cert_store_db=_PKI_DIR / "certs.db",
+)
+# La misma PKI que usa la app (misma carpeta y URL), para que los tests lean sus certificados
+# y claves, revoquen y armen CRLs y respuestas OCSP. La genera el lifespan de `client`.
+pki = MiniPki(SETTINGS.pki_dir, SETTINGS.public_base_url)
+app = create_app(SETTINGS)
 
 
 def pytest_unconfigure(config):
@@ -52,6 +59,12 @@ def pytest_unconfigure(config):
 def client():
     with TestClient(app) as c:  # el lifespan genera la PKI en _PKI_DIR
         yield c
+
+
+@pytest.fixture(scope="session")
+def services(client):
+    """Los servicios que armó la raíz de composición (`bootstrap.build`) para la app de los tests."""
+    return client.app.state.services
 
 
 @pytest.fixture(scope="session")
@@ -68,14 +81,14 @@ def pki_server(client):
         if time.monotonic() > deadline:
             raise RuntimeError("uvicorn no arrancó")
         time.sleep(0.05)
-    yield pki.BASE_URL
+    yield pki.base_url
     server.should_exit = True
     thread.join(timeout=5)
 
 
 @pytest.fixture(scope="session")
-def timestamper(client):
-    return client.app.state.tsa_engine
+def timestamper(services):
+    return services.tsa_engine
 
 
 @pytest.fixture(autouse=True)

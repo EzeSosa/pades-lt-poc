@@ -53,3 +53,9 @@ name = "La mini PKI no depende de la lógica"
 type = "forbidden"
 source_modules = ["pades_lt_poc.pki"]
 forbidden_modules = ["pades_lt_poc.services"]
+
+[[tool.importlinter.contracts]]
+name = "La lógica y la PKI no conocen la raíz de composición ni la configuración"
+type = "forbidden"
+source_modules = ["pades_lt_poc.services", "pades_lt_poc.pki"]
+forbidden_modules = ["pades_lt_poc.bootstrap", "pades_lt_poc.config"]

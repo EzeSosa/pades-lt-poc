@@ -20,12 +20,17 @@ Endpoints:
   GET  /ui/fuente                     UI del ABM de la fuente de certificados
 
 Estructura:
-  routers/    endpoints HTTP, uno por área
-  services/   una clase por operación (firmar, verificar, extraer e inspeccionar certificados) y la
-              fuente de certificados (SQLite), sin HTTP
-  seed/       la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
-  static/     las páginas de /ui, su CSS y un JS por tab (servidos en /ui/static)
-  pki.py      la mini PKI (certificados, CRLs, OCSP)
+  config.py     la configuración (variables de entorno), leída una vez al crear la app
+  bootstrap.py  raíz de composición: crea los servicios y los conecta
+  routers/      endpoints HTTP, uno por área
+  services/     una clase por operación (firmar, verificar, extraer e inspeccionar certificados) y la
+                fuente de certificados (SQLite), sin HTTP
+  seed/         la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
+  static/       las páginas de /ui, su CSS y un JS por tab (servidos en /ui/static)
+  pki.py        la mini PKI (certificados, CRLs, OCSP)
+
+La app se crea con `create_app()` (uvicorn: `--factory pades_lt_poc.app:create_app`), así que
+importar este módulo no lee la configuración ni crea nada.
 """
 
 from contextlib import asynccontextmanager
@@ -33,49 +38,42 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from . import pki
+from . import bootstrap
+from .config import Settings
 from .routers import certificates, ocsp, signing, store, tsa, ui, verification
 from .routers import pki as pki_router
 from .services import UnprocessableInput
-from .services.certificates import CertificateExtractor
-from .services.inspection import CertificateInspector
-from .services.signing import PdfSigner
-from .services.store import CertificateStore
-from .services.timestamping import load_tsa
-from .services.verification import SignatureVerifier
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    pki.ensure_pki()
-    app.state.tsa_engine = load_tsa()
-    app.state.signer = PdfSigner.from_pki()
-    # La fuente de certificados se abre (y la primera vez se crea con la carga inicial) al arrancar.
-    app.state.store = CertificateStore()
-    app.state.verifier = SignatureVerifier.from_pki(app.state.store)
-    app.state.certificate_extractor = CertificateExtractor(app.state.store)
-    app.state.certificate_inspector = CertificateInspector(app.state.store)
-    yield
-    app.state.store.close()
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """La app con `settings`, o con la configuración del entorno si no se pasa."""
+    settings = settings or Settings.from_env()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # La PKI se genera y la fuente se abre (la primera vez, con su carga inicial) al arrancar.
+        services = bootstrap.build(settings)
+        app.state.services = services
+        yield
+        services.close()
 
-app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
-for module in (pki_router, ocsp, tsa, signing, verification, certificates, store, ui):
-    app.include_router(module.router)
-app.mount("/ui/static", ui.RevalidatedStaticFiles(directory=ui.STATIC_DIR), name="ui-static")
+    app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
+    for module in (pki_router, ocsp, tsa, signing, verification, certificates, store, ui):
+        app.include_router(module.router)
+    app.mount("/ui/static", ui.RevalidatedStaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 
+    @app.exception_handler(UnprocessableInput)
+    def unprocessable_input(request: Request, exc: UnprocessableInput) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
-@app.exception_handler(UnprocessableInput)
-def unprocessable_input(request: Request, exc: UnprocessableInput) -> JSONResponse:
-    return JSONResponse({"detail": str(exc)}, status_code=422)
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse("/ui/firmas")
 
-
-@app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse("/ui/firmas")
+    return app
 
 
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("pades_lt_poc.app:app", host="127.0.0.1", port=8000)
+    uvicorn.run("pades_lt_poc.app:create_app", factory=True, host="127.0.0.1", port=8000)

@@ -7,7 +7,7 @@ from asn1crypto import crl as asn1_crl
 from pyhanko.keys import load_cert_from_pemder
 from pyhanko_certvalidator.revinfo import validate_crl
 
-from pades_lt_poc import pki
+from conftest import pki
 from pades_lt_poc.services import crl_index
 from pades_lt_poc.services.fetching import CrlCache
 

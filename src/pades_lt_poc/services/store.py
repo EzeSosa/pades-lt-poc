@@ -13,7 +13,6 @@ reinicien. La PoC corre con un solo worker.
 from __future__ import annotations
 
 import base64
-import os
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -25,12 +24,10 @@ from asn1crypto import x509 as asn1_x509
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
-from .. import pki
 from . import UnprocessableCertificate, UnprocessableInput
 from .certificates import _issued_by
 from .inspection import _is_ca, _load
 
-DB_PATH = Path(os.environ.get("CERT_STORE_DB", pki.PKI_DIR.parent / "certs.db"))
 SEED_DIR = Path(__file__).parent.parent / "seed"
 
 # La carga inicial: se aplica una sola vez, al crear la base. Lo que se borre después queda borrado.
@@ -92,7 +89,7 @@ def _sha256(cert: x509.Certificate) -> str:
 
 
 class CertificateStore:
-    def __init__(self, path: Path = DB_PATH) -> None:
+    def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         # FastAPI atiende en varios hilos: una conexión compartida, serializada con un lock.

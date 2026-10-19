@@ -6,17 +6,16 @@ import pytest
 from cryptography.hazmat.primitives import hashes
 from pyhanko_certvalidator.errors import CRLFetchError
 
-from conftest import load_signer, sign
-from pades_lt_poc import pki
-from pades_lt_poc.services.fetching import CRL_CACHE, RevocationFetcherBackend
+from conftest import load_signer, pki, sign
+from pades_lt_poc.services.fetching import RevocationFetcherBackend
 
 
 @pytest.fixture(autouse=True)
-def empty_crl_cache():
-    """El caché de CRLs es del proceso: cada test arranca sin nada descargado."""
-    CRL_CACHE.clear()
+def empty_crl_cache(services):
+    """El caché de CRLs es de la app: cada test arranca sin nada descargado."""
+    services.crl_cache.clear()
     yield
-    CRL_CACHE.clear()
+    services.crl_cache.clear()
 
 
 def verify(client, pdf: bytes, **data) -> dict:
