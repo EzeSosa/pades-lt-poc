@@ -19,7 +19,7 @@ Este documento describe cómo está organizado el código, qué puede depender d
 > | 1 | Configuración y raíz de composición | Hecho |
 > | 2 | Modelo de dominio base y `CertificateCodec` | Hecho |
 > | 3 | Fuente de certificados | Hecho |
-> | 4 | Certificados (extracción e inspección) | Pendiente |
+> | 4 | Certificados (extracción e inspección) | Hecho |
 > | 5 | Validación | Pendiente |
 > | 6 | Firma | Pendiente |
 > | 7 | Testbed (PKI, OCSP, TSA) fuera del núcleo | Pendiente |
@@ -30,15 +30,21 @@ Este documento describe cómo está organizado el código, qué puede depender d
 ```
 src/pades_lt_poc/
 ├── domain/         Python puro: modelos, reglas y errores (dominio.md)
-│   ├── certificates.py   Certificate (sobre el DER), ValidityStatus, CaKind
+│   ├── certificates.py   Certificate (sobre el DER), ValidityStatus, CaKind, CertificateDetails
+│   ├── signatures.py     las firmas de un PDF: SignedDocument, CmsSignature, Integrity, TimestampToken
+│   ├── chains.py         armado de cadenas sin exigir confianza: reglas C-01 a C-03
 │   ├── source.py         la fuente de certificados: entradas, TrustSnapshot, reglas F-01 a F-06
 │   └── errors.py         errores de negocio
 ├── application/      depende sólo del dominio
 │   ├── ports.py          los puertos de salida (puertos.md)
 │   └── use_cases/
-│       └── certificate_source.py   CertificateSource: ABM, carga inicial y snapshot (casos-de-uso.md)
+│       ├── certificate_source.py     CertificateSource: ABM, carga inicial y snapshot (casos-de-uso.md)
+│       ├── certificate_chains.py     ExtractCertificateChains: la cadena de cada firma (/certificates)
+│       └── inspect_certificates.py   InspectCertificates: detalle legible (/certificates/inspect)
 ├── adapters/outbound/  implementaciones de los puertos (adaptadores.md)
-│   ├── crypto/codec.py              CertificateCodec con cryptography
+│   ├── crypto/codec.py, details.py  CertificateCodec con cryptography (parseo, emisor, detalle legible)
+│   ├── pyhanko/signed_pdf_reader.py SignedPdfReader con pyHanko
+│   ├── http/issuer_fetcher.py       IssuerFetcher (AIA) con requests
 │   ├── sqlite/certificate_repository.py   CertificateRepository en SQLite
 │   ├── seed_catalog.py              SeedCatalog con los archivos de seed/
 │   └── clock.py                     Clock con el reloj del sistema
@@ -48,7 +54,7 @@ src/pades_lt_poc/
 ├── dependencies.py inyecta en los endpoints los servicios de app.state.services
 ├── pki.py          MiniPki: la PKI de prueba de una carpeta y una URL base
 ├── routers/        endpoints HTTP
-└── services/       lo que falta migrar: firma, verificación, extracción e inspección de certificados, TSA
+└── services/       lo que falta migrar: firma, verificación (con su descarga de revocación) y TSA
 ```
 
 Flujo de arranque:
@@ -65,7 +71,8 @@ create_app(settings)                       importar app.py no lee nada ni crea n
                ├── CrlCache()                     (uno por app)
                ├── load_tsa(pki), PdfSigner.from_pki(pki)
                ├── SignatureVerifier(source, [raíz de la PoC], fetchers con el CrlCache)
-               └── CertificateExtractor(source), CertificateInspector(source)
+               ├── ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher)
+               └── InspectCertificates(codec, source)
          app.state.services = Services          lo leen las dependencias de dependencies.py
          ... al cerrar: services.close()        (cierra la conexión SQLite del repositorio)
 ```
@@ -86,7 +93,7 @@ Una variable vacía cuenta como no definida.
 
 ## Raíz de composición (`bootstrap.py`)
 
-`build(settings, clock=None)` es el **único** lugar que crea servicios y decide qué implementación recibe cada uno. Devuelve un `Services` (dataclass inmutable) con todo lo creado; la app lo guarda en `app.state.services` y los endpoints lo reciben por `dependencies.py`. `Services.close()` libera lo que haya que liberar (hoy, la conexión SQLite). `clock` es el reloj del sistema (`SystemClock`) salvo que se pase otro: los tests pasan uno que se puede fijar.
+`build(settings, *, clock=None, issuer_fetcher=None)` es el **único** lugar que crea servicios y decide qué implementación recibe cada uno. Devuelve un `Services` (dataclass inmutable) con todo lo creado; la app lo guarda en `app.state.services` y los endpoints lo reciben por `dependencies.py`. `Services.close()` libera lo que haya que liberar (hoy, la conexión SQLite). `clock` e `issuer_fetcher` son el reloj del sistema (`SystemClock`) y la descarga AIA por HTTP (`HttpIssuerFetcher()`) salvo que se pasen otros: los tests pasan un reloj que se puede fijar y una descarga AIA sin red.
 
 Lo que antes era estado global del proceso ahora se crea o se instala acá:
 
@@ -107,11 +114,12 @@ El `Dockerfile` usa la misma forma (`CMD ["uvicorn", "--factory", "pades_lt_poc.
 
 ### En los tests
 
-`tests/conftest.py` arma un `Settings` con una carpeta temporal y un puerto libre, crea la app con `create_app(SETTINGS, CLOCK)` y expone:
+`tests/conftest.py` arma un `Settings` con una carpeta temporal y un puerto libre, crea la app con `create_app(SETTINGS, clock=CLOCK, issuer_fetcher=HttpIssuerFetcher(get=AIA))` y expone:
 
 - `pki`: una `MiniPki` sobre la misma carpeta y URL que la de la app, para leer certificados y claves, revocar y armar CRLs y respuestas OCSP. Los tests la importan con `from conftest import pki`.
 - La fixture `services`: los `Services` de la app (`services.source`, `services.verifier`, `services.crl_cache`, ...).
 - La fixture `clock`: el reloj de la app (`TestClock`). Da la hora real, salvo dentro de `with clock.frozen_at(momento):`.
+- La fixture `aia`: lo que "descarga" la app por AIA. Falla siempre (sin red), salvo que el test ponga `aia.route = url -> bytes`.
 
 Los fakes de los puertos (repositorio en memoria, reloj fijo, catálogo estático) están en `tests/fakes.py`, para probar casos de uso sin la app.
 

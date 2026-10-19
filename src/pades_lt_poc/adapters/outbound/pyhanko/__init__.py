@@ -1,0 +1,1 @@
+"""Adaptadores sobre pyHanko."""

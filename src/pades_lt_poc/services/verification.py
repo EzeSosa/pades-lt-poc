@@ -20,7 +20,7 @@ from pyhanko_certvalidator.path import ValidationPath
 from pyhanko_certvalidator.policy_decl import DEFAULT_WEAK_HASH_ALGOS, DisallowWeakAlgorithmsPolicy
 
 from ..domain.errors import UnprocessableInput
-from . import read_signed_pdf
+from ..adapters.outbound.pyhanko.signed_pdf_reader import open_signed_pdf
 from ..application.use_cases.certificate_source import CertificateSource
 from ..domain.source import TrustSnapshot
 from .trust_problems import diagnose
@@ -158,7 +158,7 @@ class SignatureVerifier:
             raise UnprocessableInput(
                 "Con conexión sólo se valida a la hora actual: la revocación que se descarga es de hoy."
             )
-        reader = read_signed_pdf(pdf)
+        reader = open_signed_pdf(pdf)
         has_dss = "/DSS" in reader.root
         dss_store = DocumentSecurityStore.read_dss(reader) if has_dss else None
         now = datetime.now(UTC)

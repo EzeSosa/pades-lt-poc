@@ -2,7 +2,7 @@
 
 El paquete `pades_lt_poc.domain` contiene los modelos, las reglas y los errores de las operaciones de negocio. Es **Python puro**: no importa ninguna biblioteca de infraestructura ni otra capa del paquete (lo verifica el contrato "El dominio es Python puro" de import-linter). Por eso se prueba con datos armados a mano, sin PKI, sin red y sin PDFs.
 
-> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2) y la fuente de certificados (paso 3). La validación y la firma se agregan en sus pasos. Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
+> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) y las firmas de un PDF y sus cadenas (paso 4). La validación y la firma se agregan en sus pasos. Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
 
 ## Lenguaje ubicuo
 
@@ -25,6 +25,13 @@ Cómo se llama cada concepto en la documentación (castellano) y en el código (
 | Origen | `Origin` | De dónde salió: la carga inicial (`seed`), a mano (`manual`) o un PDF (`pdf`). |
 | Carga inicial | `SeedCatalog`, `CertificateSource.initialize` | Los certificados que trae la fuente la primera vez (AC Raíz 2007 y 2016, AC ONTI). |
 | Snapshot | `TrustSnapshot` | Lo que usa el validador de la fuente en un instante, inmutable. |
+| Firma CMS | `CmsSignature` | Una firma CMS/PKCS#7: el certificado firmante, los demás que trae y su integridad. |
+| Integridad | `Integrity` | El chequeo criptográfico: `intact` (lo cubierto no cambió) y `valid` (la firma verifica con la clave). Sin confianza ni revocación. |
+| Sello de tiempo | `TimestampToken` | Un token RFC 3161: la hora sellada y la firma CMS de la TSA. |
+| Sello de documento | `SignatureKind.DOC_TIMESTAMP` | Un `/DocTimeStamp` (PAdES B-LTA): un sello sobre todo el documento. |
+| Cadena | `ChainResult`, `ChainLink` | Los certificados de hoja a raíz, cada uno con su origen. |
+| Origen de un eslabón | `CertSource` | `cms`, `dss`, `store` o `aia`. |
+| Detalle legible | `CertificateDetails` | Lo que muestra la inspección: nombres atributo por atributo, clave y extensiones como texto. |
 
 ## Certificado (`domain/certificates.py`)
 
@@ -41,6 +48,7 @@ Cómo se llama cada concepto en la documentación (castellano) y en el código (
 | `not_before`, `not_after` | `datetime` (UTC) | Vigencia. |
 | `is_ca` | `bool` | `basicConstraints` `cA`. Sin la extensión, `False`. |
 | `self_signed` | `bool` | Su propia clave verifica su firma. Un certificado con sujeto igual a emisor pero firmado por otra clave **no** es autofirmado. |
+| `ca_issuer_urls` | `tuple[str, ...] \| None` | Las URIs AIA caIssuers (dónde se publica el emisor), en orden, incluidas las que no son HTTP. `None` si no tiene la extensión AIA; vacía si la tiene sin caIssuers. |
 
 Comportamiento:
 
@@ -116,3 +124,53 @@ Además:
 - **Resumen**: `trusted_roots` e `intermediates` cuentan lo que usa el validador (el snapshot); `disabled`, lo deshabilitado (`summarize`).
 
 Tests: `tests/test_domain_source.py` (reglas, puro), `tests/test_certificate_source.py` (caso de uso con fakes).
+
+## Firmas de un PDF (`domain/signatures.py`)
+
+Las firmas de un PDF tal como las necesita el negocio. Las arma el puerto [`SignedPdfReader`](puertos.md#signedpdfreader) con pyHanko; el dominio no lee PDFs.
+
+| Modelo | Qué es |
+|--------|--------|
+| `SignedDocument` | `signatures` (en el orden del documento, nunca vacío) y `dss_certificates` (los del DSS, si hay). |
+| `EmbeddedSignature` | `field_name`, `kind` (`SignatureKind`), `cms` (la firma) y `timestamp` (el sello de la firma, si tiene; siempre `None` en un DocTimeStamp). |
+| `SignatureKind` | `Signature` (`/Sig`) o `DocTimeStamp`. Los valores son los de la API (`type`). |
+| `CmsSignature` | `signer` (`None` si no se pudo identificar), `other_certificates` (en orden) e `integrity`. |
+| `TimestampToken` | `time` (la hora sellada, `genTime`) y `cms` (la firma de la TSA). |
+| `Integrity` | `intact`, `valid` y `error` (si el chequeo no se pudo hacer). `ok` es `intact and valid`. |
+
+`Integrity.failure(altered)` es el motivo a mostrar cuando no verifica: el `error` si lo hay; si no, `altered` cuando lo cubierto cambió (`"el documento fue alterado"` para una firma, `"el sello no corresponde a esta firma"` para su sello), y si no, `"firma inválida"`.
+
+Qué cubre cada integridad lo decide el adaptador: para una firma (`/Sig`), el hash del ByteRange; para un DocTimeStamp, que el `messageImprint` del TSTInfo coincida con el ByteRange; para el sello de una firma, que coincida con el **valor de la firma**. Ver [pades.md](../pades.md#extracción-de-certificados-post-certificates).
+
+## Cadenas (`domain/chains.py`)
+
+La cadena de una firma, de la hoja a la raíz, armada **sin exigir confianza**: sirve para ver la PKI de cualquier firma, también de PKIs ajenas.
+
+| Modelo / función | Qué es |
+|------------------|--------|
+| `CertSource` | De dónde salió un eslabón, en orden de precedencia: `cms`, `dss`, `store`, `aia`. |
+| `ChainLink` | Un eslabón: `certificate`, `source` e `in_store` (si está en la fuente, habilitado o no). |
+| `ChainResult` | `crypto_valid`, `intact`, `valid`, `error`, `links` (hoja → raíz, `None` si no verifica), `chain_complete` (si termina en un autofirmado) y `aia_errors`. |
+| `candidate_pool(cms, extra)` | Los candidatos en orden: el firmante, los demás del CMS y los `extra`; un certificado repetido queda con su primer origen (C-02). |
+| `build_chain(pool, issued_by, lookup)` | Sube desde la hoja buscando el emisor de cada eslabón: primero en el pool, en orden, y si no está y hay `lookup`, entre lo que devuelva (origen `aia`). No repite certificados. Se detiene en un autofirmado o cuando no encuentra al emisor. |
+| `chain_for(cms, extra, altered, issued_by, lookup, known_sha256)` | La integridad y, si verifica, la cadena (C-01). |
+| `http_ca_issuer_urls(cert)` | Las URLs AIA caIssuers que se pueden descargar (http/https), o por qué no hay ninguna (C-03). |
+
+`issued_by` y `lookup` son funciones que recibe: el dominio no verifica firmas ni descarga nada. `issued_by` es `CertificateCodec.issued_by`; `lookup` lo arma el caso de uso con el `IssuerFetcher`.
+
+Errores de armado que se informan en `aia_errors`:
+
+| Mensaje | Cuándo |
+|---------|--------|
+| `<url>: <motivo>` | La descarga de esa URL falló o no trajo certificados. |
+| `<sujeto>: no tiene AIA caIssuers` | El eslabón no tiene la extensión AIA. |
+| `<sujeto>: no tiene AIA caIssuers por HTTP` | La tiene, pero sin URLs http(s). |
+| `<sujeto>: AIA no trae a su emisor` | Se descargó, pero ninguno de los certificados firmó al eslabón. |
+
+Si el emisor se encuentra, los errores de otras URLs del mismo eslabón no se informan.
+
+Tests: `tests/test_domain_chains.py` (puro), `tests/test_extract_chains.py` (caso de uso con fakes).
+
+## Detalle legible (`CertificateDetails`, en `domain/certificates.py`)
+
+Lo que muestra `/certificates/inspect` además de lo que ya tiene `Certificate`: `version`, `subject` e `issuer` atributo por atributo (`NameAttribute`: `oid`, `name`, `value`), `signature_algorithm`, `public_key` (`PublicKeyInfo`: `type`, `size` y, si es EC, `curve`) y `extensions` (`ExtensionInfo`: `oid`, `name`, `critical` y `values`, una línea de texto por valor). Lo arma `CertificateCodec.describe`; qué texto lleva cada extensión está en [adaptadores.md](adaptadores.md#adaptersoutboundcryptodetailspy-el-detalle-legible).

@@ -694,6 +694,8 @@ Limitaciones: los `/DocTimeStamp` se listan pero **no se validan**, y la validac
 
 ### Extracción de certificados: `POST /certificates`
 
+> En el código: el caso de uso `ExtractCertificateChains` (`application/use_cases/certificate_chains.py`), con el armado de cadenas en `domain/chains.py` (reglas C-01 a C-03) y la lectura del PDF en `adapters/outbound/pyhanko/signed_pdf_reader.py`. Ver [docs/arquitectura/casos-de-uso.md](arquitectura/casos-de-uso.md#extractcertificatechains-la-cadena-de-cada-firma).
+
 Devuelve, por cada firma y cada `/DocTimeStamp`, la cadena de certificados **tal como viene en el PDF**. A diferencia de `/verify`, **no mira la confianza ni la revocación**: sólo exige que la firma sea **criptográficamente válida**. Así también sirve para inspeccionar PDFs firmados con PKIs ajenas.
 
 1. **Chequeo criptográfico** (`intact` y `valid`, ver tabla de arriba). En un `/Sig`, el `message-digest` tiene que coincidir con el hash del ByteRange. En un `/DocTimeStamp`, los atributos firmados cubren el TSTInfo, y el `messageImprint` del TSTInfo tiene que coincidir con el hash del ByteRange. Si falla, la firma se informa con `crypto_valid: false`, un `error` y `certificates: null`.
@@ -740,7 +742,7 @@ En la tab Certificados de la UI cada firma es una card con su cadena, con la del
 
 Recibe un certificado y lo describe campo por campo. Sirve para mirar los certificados que salen de `/certificates`, los que publica una CA por AIA o cualquier `.crt` suelto. No evalúa confianza ni revocación: sólo lee lo que dice el certificado.
 
-- **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa el parser de las descargas AIA (`parse_certs`, en `adapters/outbound/crypto/codec.py`). Si no es nada de eso, `422`.
+- **Entrada**: un archivo `crt` en DER, PEM o PKCS#7 (`.p7c`/`.p7b`, que puede traer varios), **o** un campo `b64` con el base64 de un DER (con o sin saltos de línea) o un PEM. Se reusa el parser de las descargas AIA (`CertificateCodec.parse`, en `adapters/outbound/crypto/codec.py`). Si no es nada de eso, `422`. El caso de uso es `InspectCertificates`, y el detalle de cada extensión lo arma `adapters/outbound/crypto/details.py`.
 - **Sujeto y emisor**: atributo por atributo, en el orden del DER, con su OID. En la PKI argentina el CUIL/CUIT del titular va en `serialNumber` (`"CUIT 30680604572"`), y la tab Inspección de la UI lo destaca.
 - **`validity`**: `not_before`, `not_after`, `status` (`valid`, `expired`, `not_yet_valid`) y `days_left` respecto de la hora actual.
 - **`in_store`**: si el certificado ya está en la fuente de certificados. El reporte de inspección de la UI lo usa para ofrecer **Agregar a la fuente** a las CAs que no están: es el único lugar de la UI donde se dan altas, para que siempre se vea qué es el certificado antes de agregarlo.

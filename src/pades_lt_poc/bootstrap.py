@@ -17,16 +17,18 @@ from pyhanko.sign.timestamps import DummyTimeStamper
 
 from .adapters.outbound.clock import SystemClock
 from .adapters.outbound.crypto.codec import CryptographyCertificateCodec
+from .adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
+from .adapters.outbound.pyhanko.signed_pdf_reader import PyHankoSignedPdfReader
 from .adapters.outbound.seed_catalog import PackagedSeedCatalog
 from .adapters.outbound.sqlite.certificate_repository import SqliteCertificateRepository
-from .application.ports import Clock
+from .application.ports import Clock, IssuerFetcher
+from .application.use_cases.certificate_chains import ExtractCertificateChains
 from .application.use_cases.certificate_source import CertificateSource
+from .application.use_cases.inspect_certificates import InspectCertificates
 from .config import Settings
 from .pki import MiniPki
 from .services import crl_index
-from .services.certificates import CertificateExtractor
 from .services.fetching import CrlCache, RevocationFetcherBackend
-from .services.inspection import CertificateInspector
 from .services.signing import PdfSigner
 from .services.timestamping import load_tsa
 from .services.verification import SignatureVerifier
@@ -43,19 +45,21 @@ class Services:
     source: CertificateSource
     crl_cache: CrlCache
     verifier: SignatureVerifier
-    certificate_extractor: CertificateExtractor
-    certificate_inspector: CertificateInspector
+    extract_chains: ExtractCertificateChains
+    inspect_certificates: InspectCertificates
 
     def close(self) -> None:
         self.repository.close()
 
 
-def build(settings: Settings, clock: Clock | None = None) -> Services:
+def build(settings: Settings, *, clock: Clock | None = None, issuer_fetcher: IssuerFetcher | None = None) -> Services:
     """Crea la PKI si no existe, abre la fuente (con su carga inicial la primera vez) y arma los servicios.
 
-    `clock` es el reloj del sistema salvo que se pase otro (los tests).
+    `clock` y `issuer_fetcher` son el reloj del sistema y la descarga AIA por HTTP salvo que se
+    pasen otros (los tests).
     """
     clock = clock or SystemClock()
+    issuer_fetcher = issuer_fetcher or HttpIssuerFetcher()
     pki = MiniPki(settings.pki_dir, settings.public_base_url)
     pki.ensure()
 
@@ -82,6 +86,6 @@ def build(settings: Settings, clock: Clock | None = None) -> Services:
         source=source,
         crl_cache=crl_cache,
         verifier=SignatureVerifier(source, [poc_root], lambda: RevocationFetcherBackend(crl_cache=crl_cache)),
-        certificate_extractor=CertificateExtractor(source),
-        certificate_inspector=CertificateInspector(source),
+        extract_chains=ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher),
+        inspect_certificates=InspectCertificates(codec, source),
     )

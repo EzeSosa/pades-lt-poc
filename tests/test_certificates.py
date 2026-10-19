@@ -24,8 +24,8 @@ from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.generic_cms import extract_tst_data_iter
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-from pades_lt_poc.services import certificates as certificates_service
-from pades_lt_poc.services.certificates import _extract_chain
+from pades_lt_poc.adapters.outbound.pyhanko.signed_pdf_reader import check_integrity
+from pades_lt_poc.domain.chains import ALTERED_TIMESTAMP
 
 
 
@@ -161,7 +161,7 @@ def test_incomplete_chain_when_aia_unreachable(client, pdf):
 
 
 @pytest.fixture
-def aia_via_app(client, monkeypatch) -> Counter:
+def aia_via_app(client, aia) -> Counter:
     """Las URLs AIA de la PKI de prueba se sirven con la propia app; cuenta las descargas."""
     calls: Counter = Counter()
 
@@ -171,7 +171,7 @@ def aia_via_app(client, monkeypatch) -> Counter:
         r.raise_for_status()
         return r.content
 
-    monkeypatch.setattr(certificates_service, "_http_get", get)
+    aia.route = get
     return calls
 
 
@@ -235,13 +235,12 @@ def test_timestamp_not_matching_signature(pdf, timestamper):
     sig = PdfFileReader(BytesIO(signed)).embedded_signatures[0]
     token = next(extract_tst_data_iter(sig.signer_info, signed=False))
 
-    out = _extract_chain(token, lambda md: b"\0" * 32, [], "el sello no corresponde a esta firma")
+    integrity = check_integrity(token, lambda md: b"\0" * 32)
 
-    assert out["crypto_valid"] is False
-    assert out["intact"] is False
-    assert out["valid"] is True  # la firma de la TSA sobre el TSTInfo sigue siendo válida
-    assert out["error"] == "el sello no corresponde a esta firma"
-    assert out["certificates"] is None
+    assert integrity.ok is False
+    assert integrity.intact is False
+    assert integrity.valid is True  # la firma de la TSA sobre el TSTInfo sigue siendo válida
+    assert integrity.failure(ALTERED_TIMESTAMP) == "el sello no corresponde a esta firma"
 
 
 def test_pdf_without_signatures(client, pdf):

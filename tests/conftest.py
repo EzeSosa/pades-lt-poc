@@ -28,10 +28,10 @@ from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
 from pyhanko.sign.signers.pdf_signer import PdfTimeStamper
 
+from pades_lt_poc.adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
 from pades_lt_poc.app import create_app
 from pades_lt_poc.config import Settings
 from pades_lt_poc.pki import MiniPki
-from pades_lt_poc.services import certificates as certificates_service
 
 
 class TestClock:
@@ -54,6 +54,18 @@ class TestClock:
             self._frozen = None
 
 
+class OfflineAia:
+    """Lo que "descarga" el `HttpIssuerFetcher` de la app de los tests: nada, salvo que un test ponga `route`."""
+
+    def __init__(self) -> None:
+        self.route = None
+
+    def __call__(self, url: str) -> bytes:
+        if self.route is None:
+            raise requests.ConnectionError(f"sin red en los tests: {url}")
+        return self.route(url)
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -71,7 +83,8 @@ SETTINGS = Settings(
 # y claves, revoquen y armen CRLs y respuestas OCSP. La genera el lifespan de `client`.
 pki = MiniPki(SETTINGS.pki_dir, SETTINGS.public_base_url)
 CLOCK = TestClock()
-app = create_app(SETTINGS, CLOCK)
+AIA = OfflineAia()
+app = create_app(SETTINGS, clock=CLOCK, issuer_fetcher=HttpIssuerFetcher(get=AIA))
 
 
 def pytest_unconfigure(config):
@@ -120,14 +133,11 @@ def timestamper(services):
     return services.tsa_engine
 
 
-@pytest.fixture(autouse=True)
-def no_aia_network(monkeypatch):
-    """Sin red: las descargas AIA fallan salvo que el test instale su propio `_http_get`."""
-
-    def offline(url: str) -> bytes:
-        raise requests.ConnectionError(f"sin red en los tests: {url}")
-
-    monkeypatch.setattr(certificates_service, "_http_get", offline)
+@pytest.fixture
+def aia() -> OfflineAia:
+    """Las descargas AIA de la app: sin red, salvo que el test ponga `aia.route = url -> bytes`."""
+    yield AIA
+    AIA.route = None
 
 
 @pytest.fixture

@@ -105,3 +105,14 @@ def test_parse_certs_is_strict_about_base64(poc_certs):
     assert parse_certs(der) == poc_certs[:1]
     with pytest.raises(ValueError):
         parse_certs(base64.b64encode(der))
+
+
+def test_ca_issuer_urls(poc_certs):
+    """Las URIs AIA caIssuers, en orden; None si no hay extensión AIA (la raíz de la PoC no tiene)."""
+    intermediate, root = poc_certs
+    [leaf] = codec.parse(pki.entity(pki.SIGNER).cert().public_bytes(Enc.DER))
+    assert leaf.ca_issuer_urls == (pki.cert_url(pki.INTERMEDIATE),)  # el OCSP de la misma extensión no cuenta
+    [i] = codec.parse(intermediate.public_bytes(Enc.DER))
+    assert i.ca_issuer_urls == (pki.cert_url(pki.ROOT),)
+    [r] = codec.parse(root.public_bytes(Enc.DER))
+    assert r.ca_issuer_urls is None

@@ -2,11 +2,13 @@
 
 Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, aplica las reglas del [dominio](dominio.md) y usa el exterior sólo a través de [puertos](puertos.md). Están en `application/use_cases/` y no saben de HTTP: los endpoints de `routers/` traducen el pedido, llaman al caso de uso y arman la respuesta (presenters).
 
-> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3). La extracción e inspección de certificados, la validación y la firma siguen en `services/` y se agregan en sus pasos.
+> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) y la extracción e inspección de certificados (paso 4). La validación y la firma siguen en `services/` y se agregan en sus pasos.
 
 | Caso de uso | Endpoints | Puertos |
 |-------------|-----------|---------|
 | [`CertificateSource`](#certificatesource-la-fuente-de-certificados) | `/store/certificates*` (y el snapshot que leen `/verify`, `/certificates` y `/certificates/inspect`) | `CertificateRepository`, `CertificateCodec`, `SeedCatalog`, `Clock` |
+| [`ExtractCertificateChains`](#extractcertificatechains-la-cadena-de-cada-firma) | `POST /certificates` | `SignedPdfReader`, `CertificateCodec`, `IssuerFetcher` (y el snapshot de `CertificateSource`) |
+| [`InspectCertificates`](#inspectcertificates-el-detalle-de-un-certificado) | `POST /certificates/inspect` | `CertificateCodec` (y el snapshot de `CertificateSource`) |
 
 ## `CertificateSource`: la fuente de certificados
 
@@ -82,3 +84,68 @@ La carga inicial pide `trusted=True` para todos sus certificados; F-02 hace que 
 `routers/store.py` arma el JSON con `present(entrada, now)`: los campos del certificado (`sha256`, `subject`, `issuer`, `not_before`, `not_after`, `der_b64`), los de la entrada (`id`, `kind`, `trusted`, `enabled`, `origin`, `notes`, `created_at`, `updated_at`) y `validity_status`, que se calcula con la hora del `Clock` de la app. El router también resuelve lo que es propio de HTTP: exigir uno solo de `crt` o `b64`, y llevar el alta fuera del event loop (`run_in_threadpool`), porque bloquea.
 
 Tests: `tests/test_certificate_source.py` (con fakes), `tests/test_store.py` (por HTTP), goldens `store_*`.
+
+## `ExtractCertificateChains`: la cadena de cada firma
+
+`application/use_cases/certificate_chains.py`. Por cada firma del PDF (incluidos los DocTimeStamp), su integridad y, si verifica, la cadena de su firmante; y para cada firma con sello de tiempo, lo mismo para la TSA. No exige confianza. Las reglas C-01 a C-03 están en [dominio.md](dominio.md#cadenas-domainchainspy).
+
+**Bloquea**: puede descargar emisores por AIA. El router lo llama con `run_in_threadpool`.
+
+| Entrada | Salida | Errores (HTTP) |
+|---------|--------|----------------|
+| `pdf` (bytes), `fetch_missing` (bool) | `list[SignatureChains]`: por firma, `field_name`, `kind`, `chain` (`ChainResult`) y `timestamp` (`TimestampChain`: hora y `ChainResult`, o `None`) | `UnprocessablePdf` (422): el PDF no tiene firmas |
+
+### Qué candidatos tiene cada cadena
+
+| Cadena | Candidatos, en orden de precedencia |
+|--------|------------------------------------|
+| Firma (o DocTimeStamp) | firmante y demás certificados de su CMS (`cms`) → DSS (`dss`) → fuente, habilitados (`store`) → AIA si `fetch_missing` (`aia`) |
+| Sello de la firma | firmante y demás certificados del token (`cms`) → demás certificados del CMS de la **firma** (`cms`) → DSS → fuente → AIA |
+
+El sello de una firma se analiza sólo si la firma verifica (C-01): si el documento se alteró, no hay un valor de firma confiable que el sello pueda cubrir.
+
+### Paso a paso
+
+```mermaid
+sequenceDiagram
+    participant R as routers/certificates.py
+    participant U as ExtractCertificateChains
+    participant P as SignedPdfReader
+    participant S as CertificateSource
+    participant D as domain/chains.py
+    participant F as IssuerFetcher
+    R->>U: extract(pdf, fetch_missing)  (en un hilo)
+    U->>P: read(pdf)
+    P-->>U: SignedDocument  (o UnprocessablePdf)
+    U->>S: snapshot()
+    loop cada firma
+        U->>D: chain_for(cms, dss + fuente, ...)
+        opt falta un emisor y fetch_missing
+            D->>U: lookup(eslabón)
+            U->>F: fetch(url)  (una vez por URL en el pedido)
+        end
+        opt tiene sello y la firma verifica
+            U->>D: chain_for(token, cms de la firma + dss + fuente, ...)
+        end
+    end
+    U-->>R: [SignatureChains]
+    R->>R: present_signature(...)  → JSON
+```
+
+### Presentación (HTTP)
+
+`routers/certificates.py::present_signature` arma, por firma, `field`, `type` y los campos de la cadena: `crypto_valid`, `intact`, `valid` y, si no verifica, `error` y `certificates: null`; si verifica, `chain_complete`, `certificates` y, si hubo, `aia_errors`. Las firmas (no los DocTimeStamp) llevan además `signature_timestamp` (`null` si no tiene o si la firma no verifica). Cada certificado: `type` (`end_entity` en la posición 0, `root` si es autofirmado, si no `intermediate`), `source`, `self_signed`, `subject`, `issuer`, `serial_number` (hex), vigencia, `sha256_fingerprint`, `der_b64` e `in_store`.
+
+Tests: `tests/test_extract_chains.py` (con fakes), `tests/test_certificates.py` (por HTTP), goldens `certificates_*`.
+
+## `InspectCertificates`: el detalle de un certificado
+
+`application/use_cases/inspect_certificates.py`. El detalle legible de los certificados recibidos (uno, o todos los de un PKCS#7, en orden) y si cada uno ya está en la fuente. No hace E/S.
+
+| Entrada | Salida | Errores (HTTP) |
+|---------|--------|----------------|
+| `data`: DER, PEM, PKCS#7 o base64 de un DER | `list[InspectedCertificate]`: `certificate`, `details` (`CertificateDetails`) e `in_store` | `UnprocessableCertificate` (422) |
+
+El router exige uno solo de `crt` (archivo) o `b64` (texto) y arma el JSON con `present_inspected`: los campos del certificado y del detalle, `validity` con `status` y `days_left` calculados con el `Clock` de la app, las huellas y `in_store`.
+
+Tests: `tests/test_inspection.py` (por HTTP), goldens `inspect_*`.

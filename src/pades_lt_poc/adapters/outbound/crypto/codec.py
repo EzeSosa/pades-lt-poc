@@ -15,9 +15,11 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.serialization import pkcs7
+from cryptography.x509.oid import AuthorityInformationAccessOID
 
-from ....domain.certificates import Certificate
+from ....domain.certificates import Certificate, CertificateDetails
 from ....domain.errors import UnprocessableCertificate
+from . import details
 
 
 class CryptographyCertificateCodec:
@@ -28,6 +30,9 @@ class CryptographyCertificateCodec:
 
     def issued_by(self, cert: Certificate, issuer: Certificate) -> bool:
         return issued_by(_x509(cert), _x509(issuer))
+
+    def describe(self, cert: Certificate) -> CertificateDetails:
+        return details.describe(_x509(cert))
 
 
 def _x509(cert: Certificate) -> x509.Certificate:
@@ -46,6 +51,7 @@ def to_domain(cert: x509.Certificate) -> Certificate:
         not_after=cert.not_valid_after_utc,
         is_ca=is_ca(cert),
         self_signed=issued_by(cert, cert),
+        ca_issuer_urls=ca_issuer_urls(cert),
     )
 
 
@@ -89,6 +95,20 @@ def is_ca(cert: x509.Certificate) -> bool:
         return cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
     except x509.ExtensionNotFound:
         return False
+
+
+def ca_issuer_urls(cert: x509.Certificate) -> tuple[str, ...] | None:
+    """Las URIs AIA caIssuers, en orden; None si no tiene la extensión AIA."""
+    try:
+        aia = cert.extensions.get_extension_for_class(x509.AuthorityInformationAccess).value
+    except x509.ExtensionNotFound:
+        return None
+    return tuple(
+        d.access_location.value
+        for d in aia
+        if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS
+        and isinstance(d.access_location, x509.UniformResourceIdentifier)
+    )
 
 
 def issued_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:

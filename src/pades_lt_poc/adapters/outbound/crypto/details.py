@@ -1,69 +1,26 @@
-"""Detalle legible de un certificado X.509 (o de los de un PKCS#7): sujeto, vigencia, clave y extensiones."""
+"""El detalle legible de un certificado con `cryptography`: nombres, clave y cada extensión como texto.
+
+Es la implementación de `CertificateCodec.describe`. Ver docs/arquitectura/adaptadores.md.
+"""
 
 from __future__ import annotations
 
-import base64
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
 from asn1crypto import core as asn1_core
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 
-from ..adapters.outbound.crypto.codec import is_ca, issued_by, load_certs
-
-if TYPE_CHECKING:
-    from ..application.use_cases.certificate_source import CertificateSource
+from ....domain.certificates import CertificateDetails, ExtensionInfo, NameAttribute, PublicKeyInfo
 
 
-class CertificateInspector:
-    """Acepta DER, PEM o PKCS#7 (como los que publica AIA), o el base64 de un DER sin encabezados.
-
-    Con la fuente de certificados, cada certificado indica además si ya está en ella (`in_store`).
-    """
-
-    def __init__(self, source: CertificateSource | None = None) -> None:
-        self.source = source
-
-    def inspect(self, data: bytes) -> dict:
-        certs = load_certs(data)
-        now = datetime.now(UTC)
-        in_store = self.source.snapshot().known_sha256 if self.source else frozenset()
-        out = [_inspect(c, now) for c in certs]
-        for cert in out:
-            cert["in_store"] = cert["fingerprints"]["sha256"] in in_store
-        return {"certificates": out}
-
-
-def _inspect(cert: x509.Certificate, now: datetime) -> dict:
-    not_before, not_after = cert.not_valid_before_utc, cert.not_valid_after_utc
-    status = "not_yet_valid" if now < not_before else "expired" if now > not_after else "valid"
-    der = cert.public_bytes(serialization.Encoding.DER)
-    return {
-        "version": cert.version.value + 1,
-        "serial_number": format(cert.serial_number, "x"),
-        "subject": _name(cert.subject),
-        "issuer": _name(cert.issuer),
-        "subject_rfc4514": cert.subject.rfc4514_string(),
-        "issuer_rfc4514": cert.issuer.rfc4514_string(),
-        "self_signed": issued_by(cert, cert),
-        "is_ca": is_ca(cert),
-        "validity": {
-            "not_before": not_before.isoformat(),
-            "not_after": not_after.isoformat(),
-            "status": status,
-            "days_left": (not_after - now).days,
-        },
-        "signature_algorithm": _oid_name(cert.signature_algorithm_oid),
-        "public_key": _public_key(cert),
-        "fingerprints": {
-            "sha1": cert.fingerprint(hashes.SHA1()).hex(),
-            "sha256": cert.fingerprint(hashes.SHA256()).hex(),
-        },
-        "extensions": [_extension(e) for e in cert.extensions],
-        "der_b64": base64.b64encode(der).decode(),
-    }
+def describe(cert: x509.Certificate) -> CertificateDetails:
+    return CertificateDetails(
+        version=cert.version.value + 1,
+        subject=_name(cert.subject),
+        issuer=_name(cert.issuer),
+        signature_algorithm=_oid_name(cert.signature_algorithm_oid),
+        public_key=_public_key(cert),
+        extensions=tuple(_extension(e) for e in cert.extensions),
+    )
 
 
 # OIDs que cryptography no nombra pero aparecen en certificados reales (las CAs de
@@ -85,40 +42,31 @@ def _oid_name(oid: x509.ObjectIdentifier) -> str:
     return name
 
 
-def _name(name: x509.Name) -> list[dict]:
-    return [
-        {"oid": a.oid.dotted_string, "name": _oid_name(a.oid), "value": _text(a.value)}
-        for rdn in name.rdns
-        for a in rdn
-    ]
+def _name(name: x509.Name) -> tuple[NameAttribute, ...]:
+    return tuple(NameAttribute(a.oid.dotted_string, _oid_name(a.oid), _text(a.value)) for rdn in name.rdns for a in rdn)
 
 
 def _text(value: str | bytes) -> str:
     return value if isinstance(value, str) else value.hex()
 
 
-def _public_key(cert: x509.Certificate) -> dict:
+def _public_key(cert: x509.Certificate) -> PublicKeyInfo:
     key = cert.public_key()
     if isinstance(key, rsa.RSAPublicKey):
-        return {"type": "RSA", "size": key.key_size}
+        return PublicKeyInfo("RSA", key.key_size)
     if isinstance(key, ec.EllipticCurvePublicKey):
-        return {"type": "EC", "size": key.curve.key_size, "curve": key.curve.name}
+        return PublicKeyInfo("EC", key.curve.key_size, key.curve.name)
     if isinstance(key, dsa.DSAPublicKey):
-        return {"type": "DSA", "size": key.key_size}
+        return PublicKeyInfo("DSA", key.key_size)
     if isinstance(key, ed25519.Ed25519PublicKey):
-        return {"type": "Ed25519", "size": 256}
+        return PublicKeyInfo("Ed25519", 256)
     if isinstance(key, ed448.Ed448PublicKey):
-        return {"type": "Ed448", "size": 456}
-    return {"type": type(key).__name__, "size": None}
+        return PublicKeyInfo("Ed448", 456)
+    return PublicKeyInfo(type(key).__name__, None)
 
 
-def _extension(ext: x509.Extension) -> dict:
-    return {
-        "oid": ext.oid.dotted_string,
-        "name": _oid_name(ext.oid),
-        "critical": ext.critical,
-        "values": _extension_values(ext.value),
-    }
+def _extension(ext: x509.Extension) -> ExtensionInfo:
+    return ExtensionInfo(ext.oid.dotted_string, _oid_name(ext.oid), ext.critical, tuple(_extension_values(ext.value)))
 
 
 KEY_USAGES = (

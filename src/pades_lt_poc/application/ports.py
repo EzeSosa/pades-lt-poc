@@ -10,7 +10,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from ..domain.certificates import Certificate
+from ..domain.certificates import Certificate, CertificateDetails
+from ..domain.signatures import SignedDocument
 from ..domain.source import EntryChanges, NewEntry, SeedCertificate, StoredCertificate
 
 
@@ -35,6 +36,44 @@ class CertificateCodec(Protocol):
 
         Sólo criptografía, sin política de algoritmos: acepta firmas SHA-1, que siguen usando
         PKIs reales. Qué algoritmos se aceptan al validar es una regla aparte.
+        """
+        ...
+
+    def describe(self, cert: Certificate) -> CertificateDetails:
+        """El detalle legible de `cert`: versión, nombres atributo por atributo, algoritmo de firma,
+        clave pública y cada extensión como líneas de texto. Ver docs/arquitectura/puertos.md."""
+        ...
+
+
+class SignedPdfReader(Protocol):
+    """Lee las firmas de un PDF y verifica su integridad criptográfica (sin confianza ni revocación).
+
+    Bloquea sólo por el cómputo (hashes del documento y verificación de firmas).
+    """
+
+    def read(self, pdf: bytes) -> SignedDocument:
+        """Las firmas de `pdf`, con sus certificados y su integridad, y los certificados del DSS.
+
+        Lanza `UnprocessablePdf("El PDF no tiene firmas")` si no tiene ninguna.
+        """
+        ...
+
+
+class IssuerFetchError(Exception):
+    """No se pudo descargar o interpretar lo publicado en una URL de emisor. El mensaje dice por qué."""
+
+
+class IssuerFetcher(Protocol):
+    """Descarga los certificados publicados en una URL AIA caIssuers.
+
+    Hace E/S de red y bloquea (con un timeout por descarga). No cachea: el caché por pedido es
+    del caso de uso.
+    """
+
+    def fetch(self, url: str) -> list[Certificate]:
+        """Los certificados publicados en `url` (DER, PEM o PKCS#7).
+
+        Lanza `IssuerFetchError` si la descarga falla o lo descargado no es un certificado.
         """
         ...
 

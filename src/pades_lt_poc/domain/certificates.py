@@ -52,6 +52,9 @@ class Certificate:
     """Si `basicConstraints` dice que es una CA. Sin la extensión, no lo es."""
     self_signed: bool = field(compare=False)
     """Si su propia clave verifica su firma (no basta con que sujeto y emisor coincidan)."""
+    ca_issuer_urls: tuple[str, ...] | None = field(default=None, compare=False)
+    """Las URIs AIA caIssuers (dónde se publica su emisor), en orden. None si no tiene la extensión
+    AIA; vacío si la tiene pero sin caIssuers. Incluye las que no son HTTP."""
 
     def validity_status(self, now: datetime) -> ValidityStatus:
         """La vigencia en `now`. Los dos extremos cuentan como vigentes."""
@@ -71,3 +74,47 @@ class Certificate:
         if not self.is_ca:
             return None
         return CaKind.ROOT if self.self_signed else CaKind.INTERMEDIATE
+
+
+# --------------------------------------------------------------------------- detalle legible
+@dataclass(frozen=True)
+class NameAttribute:
+    """Un atributo de un nombre X.500 (sujeto o emisor)."""
+
+    oid: str
+    name: str
+    """El nombre corto del OID (`commonName`, `serialNumber`, ...) o el OID si no se conoce."""
+    value: str
+    """El valor como texto; los valores binarios, en hexadecimal."""
+
+
+@dataclass(frozen=True)
+class PublicKeyInfo:
+    type: str
+    """`RSA`, `EC`, `DSA`, `Ed25519`, `Ed448`, o el nombre de la clase si es otro."""
+    size: int | None
+    """Bits de la clave (de la curva, si es EC)."""
+    curve: str | None = None
+    """Sólo EC: el nombre de la curva."""
+
+
+@dataclass(frozen=True)
+class ExtensionInfo:
+    oid: str
+    name: str
+    critical: bool
+    values: tuple[str, ...]
+    """La extensión como líneas de texto. Ver `CertificateCodec.describe`."""
+
+
+@dataclass(frozen=True)
+class CertificateDetails:
+    """Lo que muestra la inspección de un certificado, además de lo que ya tiene `Certificate`."""
+
+    version: int
+    """1, 2 o 3."""
+    subject: tuple[NameAttribute, ...]
+    issuer: tuple[NameAttribute, ...]
+    signature_algorithm: str
+    public_key: PublicKeyInfo
+    extensions: tuple[ExtensionInfo, ...]
