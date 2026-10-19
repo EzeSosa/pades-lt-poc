@@ -21,7 +21,7 @@ Este documento describe cómo está organizado el código, qué puede depender d
 > | 3 | Fuente de certificados | Hecho |
 > | 4 | Certificados (extracción e inspección) | Hecho |
 > | 5 | Validación | Hecho |
-> | 6 | Firma | Pendiente |
+> | 6 | Firma | Hecho |
 > | 7 | Testbed (PKI, OCSP, TSA) fuera del núcleo | Pendiente |
 > | 8 | Limpieza | Pendiente |
 
@@ -34,6 +34,7 @@ src/pades_lt_poc/
 │   ├── signatures.py     las firmas de un PDF: SignedDocument, CmsSignature, Integrity, TimestampToken
 │   ├── chains.py         armado de cadenas sin exigir confianza: reglas C-01 a C-03
 │   ├── verification.py   validación: opciones, anclas, motivo de desconfianza, nivel PAdES (V-01 a V-10)
+│   ├── signing.py        firma: perfil, campo libre, PDFs cifrados (S-01 a S-04)
 │   ├── source.py         la fuente de certificados: entradas, TrustSnapshot, reglas F-01 a F-06
 │   └── errors.py         errores de negocio
 ├── application/      depende sólo del dominio
@@ -42,11 +43,12 @@ src/pades_lt_poc/
 │       ├── certificate_source.py     CertificateSource: ABM, carga inicial y snapshot (casos-de-uso.md)
 │       ├── certificate_chains.py     ExtractCertificateChains: la cadena de cada firma (/certificates)
 │       ├── inspect_certificates.py   InspectCertificates: detalle legible (/certificates/inspect)
-│       └── verify_signatures.py      VerifySignatures: validación de las firmas (/verify)
+│       ├── verify_signatures.py      VerifySignatures: validación de las firmas (/verify)
+│       └── sign_pdf.py               SignPdf: firma PAdES (/sign)
 ├── adapters/outbound/  implementaciones de los puertos (adaptadores.md)
 │   ├── crypto/codec.py, details.py  CertificateCodec con cryptography (parseo, emisor, detalle legible)
 │   ├── pyhanko/                     SignatureValidator y SignedPdfReader con pyHanko: validator, policies,
-│   │                                trust_paths, fetching (CRL/OCSP/AIA), crl_index, signed_pdf_reader
+│   │                                trust_paths, fetching (CRL/OCSP/AIA), crl_index, signed_pdf_reader, signer
 │   ├── http/issuer_fetcher.py       IssuerFetcher (AIA) con requests
 │   ├── sqlite/certificate_repository.py   CertificateRepository en SQLite
 │   ├── seed_catalog.py              SeedCatalog con los archivos de seed/
@@ -57,7 +59,7 @@ src/pades_lt_poc/
 ├── dependencies.py inyecta en los endpoints los servicios de app.state.services
 ├── pki.py          MiniPki: la PKI de prueba de una carpeta y una URL base
 ├── routers/        endpoints HTTP
-└── services/       lo que falta migrar: la firma y la TSA
+└── services/       lo que falta migrar: el motor de la TSA (testbed)
 ```
 
 Flujo de arranque:
@@ -72,7 +74,8 @@ create_app(settings)                       importar app.py no lee nada ni crea n
                ├── CertificateSource(repositorio, codec, PackagedSeedCatalog(), clock).initialize()
                │                                  (carga inicial la primera vez, y el snapshot)
                ├── CrlCache()                     (uno por app)
-               ├── load_tsa(pki), PdfSigner.from_pki(pki)
+               ├── load_tsa(pki)
+               ├── SignPdf(PyHankoPdfSigner.from_files(clave, cert y cadena del firmante, raíz de la PoC))
                ├── VerifySignatures(PyHankoSignatureValidator(codec, fetchers con el CrlCache),
                │                    source, [raíz de la PoC], clock)
                ├── ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher)
@@ -103,7 +106,7 @@ Lo que antes era estado global del proceso ahora se crea o se instala acá:
 
 - **Índice de CRLs** (`adapters/outbound/pyhanko/crl_index.install()`): reemplaza una función de pyhanko-certvalidator, que no la recibe por parámetro, así que sigue siendo global al proceso. Se instala en `build`, no como efecto lateral de crear el validador. Llamarla más de una vez no tiene efecto adicional.
 - **Caché de CRLs** (`CrlCache`): era un singleton del módulo `fetching` (`CRL_CACHE`). Ahora hay uno por app, que se pasa al `RevocationFetcherBackend` de cada verificación con conexión. Los tests lo vacían con `services.crl_cache.clear()`.
-- **La PKI de prueba** (`MiniPki`): antes eran funciones de módulo que leían `PKI_DIR` y `BASE_URL`; ahora es un objeto con su carpeta y su URL, y los servicios que la usan la reciben (`PdfSigner.from_pki(pki)`, `load_tsa(pki)`). El verificador ya no la conoce: recibe la raíz de la PoC como una lista de anclas implícitas.
+- **La PKI de prueba** (`MiniPki`): antes eran funciones de módulo que leían `PKI_DIR` y `BASE_URL`; ahora es un objeto con su carpeta y su URL, y `bootstrap.build` saca de ella lo que necesita cada pieza: los archivos del firmante para `PyHankoPdfSigner.from_files`, la raíz como ancla implícita de `VerifySignatures`, y la PKI entera para la TSA (`load_tsa(pki)`). Ningún caso de uso ni adaptador la conoce.
 
 ### Arranque con uvicorn
 

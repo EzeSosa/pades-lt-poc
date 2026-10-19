@@ -20,6 +20,7 @@ from .adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
 from .adapters.outbound.pyhanko import crl_index
 from .adapters.outbound.pyhanko.fetching import CrlCache, RevocationFetcherBackend
 from .adapters.outbound.pyhanko.signed_pdf_reader import PyHankoSignedPdfReader
+from .adapters.outbound.pyhanko.signer import PyHankoPdfSigner
 from .adapters.outbound.pyhanko.validator import PyHankoSignatureValidator
 from .adapters.outbound.seed_catalog import PackagedSeedCatalog
 from .adapters.outbound.sqlite.certificate_repository import SqliteCertificateRepository
@@ -27,10 +28,10 @@ from .application.ports import Clock, IssuerFetcher
 from .application.use_cases.certificate_chains import ExtractCertificateChains
 from .application.use_cases.certificate_source import CertificateSource
 from .application.use_cases.inspect_certificates import InspectCertificates
+from .application.use_cases.sign_pdf import SignPdf
 from .application.use_cases.verify_signatures import VerifySignatures
 from .config import Settings
 from .pki import MiniPki
-from .services.signing import PdfSigner
 from .services.timestamping import load_tsa
 
 
@@ -39,7 +40,7 @@ class Services:
     settings: Settings
     pki: MiniPki
     tsa_engine: DummyTimeStamper
-    signer: PdfSigner
+    sign_pdf: SignPdf
     clock: Clock
     repository: SqliteCertificateRepository
     source: CertificateSource
@@ -81,7 +82,15 @@ def build(settings: Settings, *, clock: Clock | None = None, issuer_fetcher: Iss
         settings=settings,
         pki=pki,
         tsa_engine=load_tsa(pki),
-        signer=PdfSigner.from_pki(pki),
+        # El firmante de la PoC, con su cadena; al firmar, la cadena se valida contra la raíz de la PoC.
+        sign_pdf=SignPdf(
+            PyHankoPdfSigner.from_files(
+                key=pki.entity(pki.SIGNER).key_path,
+                cert=pki.entity(pki.SIGNER).cert_path,
+                chain=[pki.entity(pki.INTERMEDIATE).cert_path, pki.entity(pki.ROOT).cert_path],
+                trust_root=pki.entity(pki.ROOT).cert_path,
+            )
+        ),
         clock=clock,
         repository=repository,
         source=source,

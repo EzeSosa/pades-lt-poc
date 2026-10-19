@@ -110,13 +110,13 @@ La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el vol
 
 ## Estructura
 
-> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados), **paso 3** (fuente de certificados), **paso 4** (extracción e inspección de certificados) y **paso 5** (validación). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Hechos: **paso 0** (red de seguridad), **paso 1** (configuración y raíz de composición), **paso 2** (modelo de dominio base y codec de certificados), **paso 3** (fuente de certificados), **paso 4** (extracción e inspección de certificados), **paso 5** (validación) y **paso 6** (firma). La estructura de abajo es la vigente; el detalle y el estado de cada paso están en [docs/arquitectura](docs/arquitectura/README.md).
 
 ```
 src/pades_lt_poc/
-├── domain/           Python puro: certificado, firmas de un PDF, cadenas, validación, fuente de certificados, reglas y errores
-├── application/      los puertos (Protocols) y los casos de uso: validación (/verify), fuente (/store), cadenas (/certificates) e inspección
-├── adapters/         implementaciones de los puertos: validación y lectura de PDFs (pyHanko), codec (cryptography), fuente (SQLite), AIA (requests), carga inicial, reloj
+├── domain/           Python puro: certificado, firmas de un PDF, cadenas, validación, firma, fuente de certificados, reglas y errores
+├── application/      los puertos (Protocols) y los casos de uso: firma (/sign), validación (/verify), fuente (/store), cadenas (/certificates) e inspección
+├── adapters/         implementaciones de los puertos: firma, validación y lectura de PDFs (pyHanko), codec (cryptography), fuente (SQLite), AIA (requests), carga inicial, reloj
 ├── config.py         Settings: la configuración (variables de entorno), leída una vez al crear la app
 ├── bootstrap.py      raíz de composición: crea los servicios y los conecta (en el lifespan)
 ├── app.py            create_app(): FastAPI, lifespan, routers y manejo de errores
@@ -127,7 +127,6 @@ src/pades_lt_poc/
 │   ├── signing.py  verification.py  certificates.py  store.py
 │   └── ui.py             sirve las páginas de /ui
 ├── services/         lo que falta migrar, sin nada de HTTP
-│   ├── signing.py        PdfSigner            (/sign)
 │   └── timestamping.py   motor de la TSA      (/tsa)
 ├── seed/             la carga inicial de la fuente (AC Raíz Argentina 2007 y 2016, AC ONTI)
 └── static/           la UI: una página y un script por pantalla, ui.css, ui.js y un JS por tab (servidos en /ui/static)

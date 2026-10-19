@@ -2,7 +2,7 @@
 
 Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, aplica las reglas del [dominio](dominio.md) y usa el exterior sólo a través de [puertos](puertos.md). Están en `application/use_cases/` y no saben de HTTP: los endpoints de `routers/` traducen el pedido, llaman al caso de uso y arman la respuesta (presenters).
 
-> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) la extracción e inspección de certificados (paso 4) y la validación (paso 5). La firma sigue en `services/` y se agrega en su paso.
+> Este documento crece con la migración. Hoy tiene la fuente de certificados (paso 3) la extracción e inspección de certificados (paso 4) la validación (paso 5) y la firma (paso 6).
 
 | Caso de uso | Endpoints | Puertos |
 |-------------|-----------|---------|
@@ -10,6 +10,7 @@ Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, ap
 | [`ExtractCertificateChains`](#extractcertificatechains-la-cadena-de-cada-firma) | `POST /certificates` | `SignedPdfReader`, `CertificateCodec`, `IssuerFetcher` (y el snapshot de `CertificateSource`) |
 | [`InspectCertificates`](#inspectcertificates-el-detalle-de-un-certificado) | `POST /certificates/inspect` | `CertificateCodec` (y el snapshot de `CertificateSource`) |
 | [`VerifySignatures`](#verifysignatures-validar-las-firmas-de-un-pdf) | `POST /verify` | `SignatureValidator`, `Clock` (y el snapshot de `CertificateSource`) |
+| [`SignPdf`](#signpdf-firmar-un-pdf) | `POST /sign` | `PdfSigningEngine` |
 
 ## `CertificateSource`: la fuente de certificados
 
@@ -214,3 +215,38 @@ La hora declarada sólo se lee si se pidió validar a esa hora.
 En `trust_problem.paths`, cada eslabón se muestra con su CN (o el nombre completo si no tiene), su vencimiento y su huella: una CA renovada tiene el mismo nombre en los dos caminos.
 
 Tests: `tests/test_verify_signatures.py` (con un validador falso), `tests/test_verify.py`, `tests/test_verify_online.py` y `tests/test_store.py` (por HTTP), goldens `verify_*`.
+
+## `SignPdf`: firmar un PDF
+
+`application/use_cases/sign_pdf.py`. Firma en PAdES B-LT (o B-LTA) con la identidad del motor y el sello de tiempo de la TSA indicada. Las reglas S-01 a S-04 están en [dominio.md](dominio.md#firma-domainsigningpy).
+
+**Async**: el motor pide el sello a la TSA y la revocación de la cadena por HTTP.
+
+| Entrada | Salida | Errores (HTTP) |
+|---------|--------|----------------|
+| `pdf` (bytes), `SignRequest`, `tsa_url` | El PDF firmado (bytes) | `UnprocessablePdf` (422): no se puede leer, está cifrado (S-01) o la firma falló (p. ej. un certificado revocado). |
+
+```mermaid
+sequenceDiagram
+    participant R as routers/signing.py
+    participant U as SignPdf
+    participant E as PdfSigningEngine
+    participant D as domain/signing.py
+    R->>U: sign(pdf, SignRequest, tsa_url)
+    U->>E: open(pdf)
+    E-->>U: SignablePdf  (o UnprocessablePdf: no es un PDF)
+    U->>D: check_signable(encrypted)  (S-01)
+    U->>D: spec_for(pedido, field_names)  (S-02, S-04)
+    U->>E: await sign(spec, tsa_url)
+    Note over E: firmante nuevo (S-03), sello de la TSA,<br/>revocación de la cadena y DSS
+    E-->>U: PDF firmado  (o UnprocessablePdf: no se pudo firmar)
+    U-->>R: bytes
+```
+
+El rechazo de un PDF cifrado va **antes** de leer su formulario: en un PDF cifrado leerlo puede fallar.
+
+### Presentación (HTTP)
+
+`routers/signing.py` arma la URL de la TSA con la URL del pedido (`<base_url>/tsa`): la app se pide el sello a sí misma por HTTP, como si la TSA fuera externa. Devuelve el PDF con `Content-Disposition: attachment` y el nombre subido más `-pades-lt.pdf`: `filename*` en UTF-8 (RFC 6266) y un `filename` ASCII para clientes viejos (`content_disposition`, que es HTTP y no del dominio).
+
+Tests: `tests/test_domain_signing.py` (con un motor falso), `tests/test_sign.py` (por HTTP), golden `sign_*`, la suite de PDFs.

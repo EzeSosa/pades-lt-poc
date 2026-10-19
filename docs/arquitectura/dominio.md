@@ -2,7 +2,7 @@
 
 El paquete `pades_lt_poc.domain` contiene los modelos, las reglas y los errores de las operaciones de negocio. Es **Python puro**: no importa ninguna biblioteca de infraestructura ni otra capa del paquete (lo verifica el contrato "El dominio es Python puro" de import-linter). Por eso se prueba con datos armados a mano, sin PKI, sin red y sin PDFs.
 
-> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) las firmas de un PDF y sus cadenas (paso 4) y la validación (paso 5). La firma se agrega en su paso. Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
+> Este documento crece con la migración. Hoy cubre el certificado y los errores (paso 2), la fuente de certificados (paso 3) las firmas de un PDF y sus cadenas (paso 4) la validación (paso 5) y la firma (paso 6). Las reglas, con sus ids, están juntas en [invariantes.md](invariantes.md).
 
 ## Lenguaje ubicuo
 
@@ -36,6 +36,8 @@ Cómo se llama cada concepto en la documentación (castellano) y en el código (
 | Autosuficiente | `self_contained` | El PDF alcanza solo para validarse: ninguna cadena se completó con la fuente. |
 | Hora declarada | `ValidationTimeMode.CLAIMED_SIGNING_TIME` | La hora que la firma dice tener (no probada por un sello). |
 | Motivo de desconfianza | `TrustProblem`, `TrustReason` | Por qué una firma o su sello no es confiable, con los caminos probados. |
+| Campo de firma | `SignatureSpec.field_name` | El campo del formulario donde va la firma (`FirmaN`). |
+| Perfil de firma | `SignatureSpec` | PAdES (`ETSI.CAdES.detached`) con SHA-256, sello de tiempo, DSS y, si se pide, DocTimeStamp. |
 | Detalle legible | `CertificateDetails` | Lo que muestra la inspección: nombres atributo por atributo, clave y extensiones como texto. |
 
 ## Certificado (`domain/certificates.py`)
@@ -245,3 +247,19 @@ Cada camino es un `PathAttempt`: `chain` (hoja → ancla), `reason` (`TrustReaso
 Los textos que ve el usuario (notas, advertencias, resúmenes y sugerencias) son constantes de este módulo.
 
 Tests: `tests/test_domain_verification.py` (puro), `tests/test_verify_signatures.py` (caso de uso con un validador falso).
+
+## Firma (`domain/signing.py`)
+
+Qué se decide al firmar un PDF. Firmar (CMS, sello de tiempo, DSS) lo hace el adaptador con pyHanko; el perfil y las reglas están acá. El flujo completo está en [pades.md](../pades.md#9-flujo-de-sign-paso-a-paso).
+
+| Modelo / función | Qué es |
+|------------------|--------|
+| `SignRequest` | Lo que pide quien firma: `reason`, `location` y `lta` (si además va un DocTimeStamp). |
+| `SignatureSpec` | Lo que el adaptador tiene que producir: `field_name`, `reason`, `location`, `lta`, y el perfil fijo (S-04): `digest_algorithm = "sha256"`, `subfilter = "ETSI.CAdES.detached"`. |
+| `check_signable(encrypted)` | S-01: un PDF cifrado no se firma (`UnprocessablePdf` con `ENCRYPTED`). |
+| `free_field_name(campos)` | S-02: `FirmaN` con el menor N que no usa ningún campo del formulario, sea de firma o no. Los nombres son completos (`Grupo.Firma2` no choca con `Firma2`) y exactos. |
+| `spec_for(pedido, campos)` | El `SignatureSpec` para un pedido y los campos del PDF. |
+
+Lo que el perfil implica, y que garantiza el adaptador: sello de tiempo de firma de la TSA (B-T), DSS con la cadena y la revocación del firmante y de la TSA (B-LT), un DocTimeStamp si `lta` (B-LTA), y la revocación obligatoria al firmar (si algo está revocado o no responde, la firma falla).
+
+Tests: `tests/test_domain_signing.py` (reglas y caso de uso con un motor falso).

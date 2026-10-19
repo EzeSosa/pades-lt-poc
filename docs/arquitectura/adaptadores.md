@@ -4,7 +4,7 @@ Los adaptadores conectan la aplicación con el exterior. Los **de salida** (`ada
 
 Un adaptador de salida no conoce HTTP, ni la raíz de composición, ni el código que todavía no se migró (`services/`, `pki.py`). Lo verifica el contrato "Los adaptadores de salida no conocen HTTP, la composición ni el código sin migrar" de import-linter.
 
-> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) y el de la validación (paso 5).
+> Este documento crece con la migración. Hoy tiene el codec de certificados (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) el de la validación (paso 5) y el de la firma (paso 6).
 
 ## `adapters/outbound/crypto/codec.py`: certificados con `cryptography`
 
@@ -109,6 +109,7 @@ Implementa [`SignatureValidator`](puertos.md#signaturevalidator). Ningún tipo d
 | `crl_index.py` | Un índice de seriales por CRL que reemplaza la búsqueda de pyhanko-certvalidator (CRLs grandes). |
 | `convert.py` | asn1crypto ↔ `Certificate`. |
 | `signed_pdf_reader.py` | El lector de PDFs firmados (paso 4); `open_signed_pdf` lo usa también el validador. |
+| `signer.py` | El motor de firma (paso 6). |
 
 ### El `ValidationContext` de cada firma
 
@@ -158,3 +159,17 @@ Timeouts: 10 s por OCSP o AIA y 60 s por CRL (la de la AC ONTI pesa ~9 MB). Las 
 pyhanko-certvalidator busca un serial recorriendo la CRL con asn1crypto, entrada por entrada: con la CRL de la AC ONTI (~240 mil entradas) cada búsqueda tarda ~2 s. `install()` reemplaza esa función (`validate_crl.find_cert_in_list`) por una que consulta primero un índice de seriales armado con `cryptography` (~0,15 s por CRL, cacheado por huella, hasta 16). Si el serial no está, responde enseguida; si está, o la CRL es indirecta, delega en la original. Es un parche global al proceso: lo instala `bootstrap.build`, una vez.
 
 Tests: `tests/test_verify.py`, `tests/test_verify_online.py`, `tests/test_crl_index.py`, `tests/test_store.py` y la suite de PDFs (por HTTP y con PDFs reales), goldens `verify_*`.
+
+## `adapters/outbound/pyhanko/signer.py`: la firma con pyHanko
+
+Implementa [`PdfSigningEngine`](puertos.md#pdfsigningengine) con `PyHankoPdfSigner`. `from_files(key, cert, chain, trust_root)` carga la identidad desde archivos PEM una sola vez, al arrancar (`bootstrap.build` le pasa los de la PKI de la PoC).
+
+- **Apertura**: `IncrementalPdfFileWriter`. Cualquier error de lectura es un PDF inválido (`UnprocessablePdf`, 422).
+- **Firmante por firma** (S-03): `_new_signer` crea un `SimpleSigner` nuevo con el certificado, la clave y el registro de la plantilla. pyHanko le instala estado al firmante durante la firma (p. ej. el proveedor de MAC de los PDF cifrados) y, si la firma falla, no lo saca: con un firmante compartido, un pedido fallido rompía todos los siguientes hasta reiniciar.
+- **Contexto de validación al firmar**: `ValidationContext(trust_roots=[ancla], allow_fetching=True, revocation_mode="hard-fail")`. pyHanko construye las cadenas del firmante y de la TSA y descarga su revocación (OCSP y CRL de las URLs grabadas en los certificados) para embeberla en el DSS. Si algo está revocado o no responde, la firma falla.
+- **Metadatos** (`PdfSignatureMetadata`): campo, motivo y lugar del `SignatureSpec`; `md_algorithm` y `subfilter` (`ETSI.CAdES.detached` → `SigSeedSubFilter.PADES`) del perfil; `embed_validation_info=True` (DSS, B-LT); `use_pades_lta=spec.lta` (DocTimeStamp, B-LTA).
+- **Sello de tiempo**: `HTTPTimeStamper(tsa_url)` (B-T).
+- **Errores**: cualquier excepción al firmar se devuelve como `UnprocessablePdf("No se pudo firmar: <tipo>: <mensaje>")`: es una PoC y el motivo le sirve a quien firma.
+- **Nombres de campo** (`field_names`): recorre `/AcroForm /Fields` y sus `/Kids`, armando el nombre completo de cada campo con `/T`.
+
+Tests: `tests/test_sign.py` (por HTTP contra la app escuchando en un puerto real), golden `sign_b_lt`, la suite de PDFs (con el canario de S-03).

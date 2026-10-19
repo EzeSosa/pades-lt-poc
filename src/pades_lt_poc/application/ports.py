@@ -14,6 +14,7 @@ from typing import Protocol
 
 from ..domain.certificates import Certificate, CertificateDetails
 from ..domain.signatures import SignatureKind, SignedDocument
+from ..domain.signing import SignatureSpec
 from ..domain.source import EntryChanges, NewEntry, SeedCertificate, StoredCertificate
 from ..domain.verification import DssSummary, FetchedRevocation, SignatureEvaluation, ValidatedAt, ValidationPolicy
 
@@ -202,4 +203,32 @@ class SignatureValidator(Protocol):
 
         Lanza `UnprocessablePdf("El PDF no tiene firmas")` si no tiene ninguna.
         """
+        ...
+
+
+class SignablePdf(Protocol):
+    """Un PDF abierto para firmar. Lo da `PdfSigningEngine.open`."""
+
+    encrypted: bool
+    field_names: frozenset[str]
+    """Los nombres completos de los campos del formulario (con los de sus padres, separados por punto)."""
+
+    async def sign(self, spec: SignatureSpec, tsa_url: str) -> bytes:
+        """El PDF firmado según `spec` (S-04), con el sello de tiempo de la TSA en `tsa_url`.
+
+        Se llama una vez por PDF abierto. Lanza `UnprocessablePdf("No se pudo firmar: ...")` si la
+        firma falla; una falla no afecta a las firmas siguientes (S-03).
+        """
+        ...
+
+
+class PdfSigningEngine(Protocol):
+    """Firma PDFs en PAdES con una identidad fija (clave, certificado y cadena del firmante).
+
+    Async: al firmar pide el sello de tiempo a la TSA y la revocación de la cadena por HTTP.
+    """
+
+    def open(self, pdf: bytes) -> SignablePdf:
+        """Abre `pdf` para firmar. Lanza `UnprocessablePdf("No es un PDF válido o está dañado: ...")`
+        si no se puede leer (vacío, otro formato, truncado)."""
         ...

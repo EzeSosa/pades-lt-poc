@@ -57,7 +57,7 @@ Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se su
 
 Función que convierte datos de cualquier tamaño en un valor de tamaño fijo (el *digest*). Es de un solo sentido y resistente a colisiones: cambiar un bit del documento cambia completamente el resumen. Se firma el hash, no el documento entero.
 
-> En el código: `md_algorithm="sha256"` en [services/signing.py](../src/pades_lt_poc/services/signing.py). Todos los certificados, CRLs y respuestas OCSP también se firman con SHA-256.
+> En el código: `digest_algorithm="sha256"` en el perfil de firma (`SignatureSpec`, [domain/signing.py](../src/pades_lt_poc/domain/signing.py)), que el adaptador pasa a pyHanko como `md_algorithm`. Todos los certificados, CRLs y respuestas OCSP también se firman con SHA-256.
 
 ### Criptografía asimétrica
 
@@ -122,7 +122,7 @@ La **cadena** (o *camino de certificación*) es la secuencia `hoja → intermedi
 
 **Validar un camino** (RFC 5280 §6) significa comprobar, para cada eslabón: la firma del emisor, las fechas de validez, las extensiones (que una CA sea realmente CA, que la clave tenga el uso correcto) y el estado de revocación.
 
-> En el código: `PdfSigner.trust_root` es el ancla de confianza al firmar. Al verificar (`VerifySignatures.trust_roots()`, regla V-01) se suman las raíces confiables de la **fuente de certificados** (el caso de uso `CertificateSource`, sobre una tabla SQLite que se administra por `/store/certificates`); su carga inicial trae las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)), de `src/pades_lt_poc/seed/`. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
+> En el código: la raíz de la PoC es el ancla de confianza al firmar (`trust_root` de `PyHankoPdfSigner.from_files`). Al verificar (`VerifySignatures.trust_roots()`, regla V-01) se suman las raíces confiables de la **fuente de certificados** (el caso de uso `CertificateSource`, sobre una tabla SQLite que se administra por `/store/certificates`); su carga inicial trae las dos *AC Raíz* de Argentina (2007 y 2016, ver [Rotación de la raíz](#rotación-de-la-raíz)), de `src/pades_lt_poc/seed/`. Para que Adobe Reader muestre la firma en verde, hay que importar `root.crt` como confiable.
 
 ### Rotación de la raíz
 
@@ -495,6 +495,8 @@ Detalles:
 1. **Contexto de validación al firmar** (`ValidationContext(trust_roots=[root], allow_fetching=True, revocation_mode="hard-fail")`): pyHanko construye las cadenas del firmante y de la TSA, y **descarga** la revocación siguiendo las URLs de AIA (OCSP) y CDP (CRL) grabadas en los certificados. Si algo está revocado o no responde, la firma falla con **HTTP 422** y el motivo.
 2. **Firmante**: `SimpleSigner` cargado al arrancar con la clave y el certificado del firmante más la cadena `intermedia, raíz`, que se embebe en el CMS.
 3. **Valida antes de entregar**: gracias a `hard-fail`, `/sign` nunca devuelve un PDF con un firmante revocado.
+
+> En el código: el caso de uso `SignPdf` (`application/use_cases/sign_pdf.py`) rechaza los PDFs cifrados y elige el campo (`domain/signing.py`, reglas S-01 a S-04); la firma con pyHanko está en `adapters/outbound/pyhanko/signer.py`. Ver [docs/arquitectura/casos-de-uso.md](arquitectura/casos-de-uso.md#signpdf-firmar-un-pdf).
 
 ---
 

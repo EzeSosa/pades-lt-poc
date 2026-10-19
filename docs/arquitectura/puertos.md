@@ -4,7 +4,7 @@ Los puertos de salida son lo que los casos de uso necesitan del exterior. Están
 
 Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores lanza, si hace E/S y si bloquea. Una implementación nueva tiene que cumplirlo entero, y los tests del adaptador lo verifican.
 
-> Este documento crece con la migración. Hoy tiene `CertificateCodec` (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) y el de la validación (paso 5).
+> Este documento crece con la migración. Hoy tiene `CertificateCodec` (paso 2), los de la fuente de certificados (paso 3) los de la extracción de cadenas (paso 4) el de la validación (paso 5) y el de la firma (paso 6).
 
 | Puerto | Implementaciones | Lo usa |
 |--------|------------------|--------|
@@ -12,11 +12,12 @@ Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores 
 | [`SignedPdfReader`](#signedpdfreader) | `PyHankoSignedPdfReader`; `FakeReader` (tests) | `ExtractCertificateChains` |
 | [`IssuerFetcher`](#issuerfetcher) | `HttpIssuerFetcher`; `FakeFetcher` (tests) | `ExtractCertificateChains` |
 | [`SignatureValidator`](#signaturevalidator) | `PyHankoSignatureValidator`; `FakeValidator` (tests) | `VerifySignatures` |
+| [`PdfSigningEngine`](#pdfsigningengine) | `PyHankoPdfSigner`; `FakeEngine` (tests) | `SignPdf` |
 | [`CertificateRepository`](#certificaterepository) | `SqliteCertificateRepository`; `InMemoryCertificateRepository` (tests) | `CertificateSource` |
 | [`SeedCatalog`](#seedcatalog) | `PackagedSeedCatalog`; `StaticSeedCatalog` (tests) | `CertificateSource` |
 | [`Clock`](#clock) | `SystemClock`; `FixedClock` y `TestClock` (tests) | `CertificateSource`, `VerifySignatures`, `routers/store.py`, `routers/certificates.py` |
 
-Los fakes de los tests están en `tests/fakes.py` (y `TestClock` en `tests/conftest.py`; `FakeReader` y `FakeFetcher` en `tests/test_extract_chains.py`; `FakeValidator` en `tests/test_verify_signatures.py`).
+Los fakes de los tests están en `tests/fakes.py` (y `TestClock` en `tests/conftest.py`; `FakeReader` y `FakeFetcher` en `tests/test_extract_chains.py`; `FakeValidator` en `tests/test_verify_signatures.py`; `FakeEngine` en `tests/test_domain_signing.py`).
 
 ## `CertificateCodec`
 
@@ -85,7 +86,7 @@ La carga inicial de la fuente. `seeds()` devuelve una lista fija de `SeedCertifi
 
 `now()` devuelve la hora actual con zona horaria (UTC). Existe para poder fijar la hora en los tests: la vigencia de un certificado (`validity_status`) y las horas de la fuente (`created_at`, `updated_at`) salen de acá.
 
-La validación toma de acá la hora actual (`validated_at` y el `moment` sin conexión); con conexión pyHanko valida a su propia hora actual, porque no admite descargar con una hora fija. La firma todavía usa la hora del sistema (paso 6).
+La validación toma de acá la hora actual (`validated_at` y el `moment` sin conexión); con conexión pyHanko valida a su propia hora actual, porque no admite descargar con una hora fija. La firma no usa el reloj: la hora la ponen pyHanko (`signingTime`) y la TSA (el sello).
 
 ## `SignedPdfReader`
 
@@ -149,3 +150,21 @@ Abre el PDF para validar con la [`ValidationPolicy`](dominio.md#política). Lanz
 | `fetched()` | Lo descargado hasta el momento (`FetchedRevocation`), o `None` si la sesión no es con conexión. |
 
 `SignatureRef` está en `application/ports.py`: es un identificador de la sesión, no un concepto de negocio.
+
+## `PdfSigningEngine`
+
+Firma PDFs en PAdES con una identidad fija: la clave, el certificado y la cadena del firmante, y el ancla con la que se valida esa cadena al firmar. La identidad es configuración del adaptador, no del caso de uso.
+
+**Propiedades**: async al firmar (pide el sello a la TSA y la revocación por HTTP). Una firma que falla no afecta a las siguientes (S-03).
+
+### `open(pdf: bytes) -> SignablePdf`
+
+Abre el PDF para firmarlo con una actualización incremental. Lanza `UnprocessablePdf("No es un PDF válido o está dañado: <error>")` si no se puede leer (vacío, otro formato, truncado).
+
+### `SignablePdf`
+
+| Miembro | Contrato |
+|---------|----------|
+| `encrypted` | Si el PDF está cifrado. |
+| `field_names` | Los nombres completos de los campos del formulario (con los de sus padres, separados por punto). Se puede leer recién cuando se lo pide: en un PDF cifrado puede fallar. |
+| `await sign(spec, tsa_url)` | El PDF firmado según el `SignatureSpec` (S-04), con el sello de la TSA en `tsa_url`. Se llama una vez por PDF abierto. Lanza `UnprocessablePdf("No se pudo firmar: <error>")` si falla. |

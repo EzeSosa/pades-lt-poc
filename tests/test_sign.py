@@ -15,7 +15,8 @@ from pyhanko.sign import fields
 
 from conftest import load_signer, sign
 from pades_lt_poc.routers.signing import content_disposition
-from pades_lt_poc.services.signing import _free_field_name
+from pades_lt_poc.adapters.outbound.pyhanko.signer import field_names as form_field_names
+from pades_lt_poc.domain.signing import free_field_name
 
 
 def post_sign(base_url: str, pdf: bytes, filename: str = "doc.pdf") -> requests.Response:
@@ -78,7 +79,9 @@ def test_free_field_name_skips_non_signature_fields():
     pdf += b"xref\n0 6\n0000000000 65535 f \n" + b"".join(b"%010d 00000 n \n" % o for o in offsets)
     pdf += b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % xref
     # `Firma1` es de texto; `Grupo.Firma2` no choca con `Firma2`.
-    assert _free_field_name(PdfFileReader(BytesIO(pdf))) == "Firma2"
+    names = form_field_names(PdfFileReader(BytesIO(pdf)))
+    assert names == {"Firma1", "Grupo", "Grupo.Firma2"}
+    assert free_field_name(names) == "Firma2"
 
 
 # --------------------------------------------------------------------------- nombre de descarga

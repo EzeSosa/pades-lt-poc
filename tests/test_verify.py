@@ -7,7 +7,8 @@ import pytest
 from pyhanko.keys import load_cert_from_pemder
 from pyhanko.pdf_utils.reader import PdfFileReader
 
-from conftest import load_signer, sign
+from conftest import load_signer, pki, sign
+from cryptography.hazmat.primitives import serialization
 from pades_lt_poc.adapters.outbound.seed_catalog import SEED_DIR
 from pades_lt_poc.adapters.outbound.pyhanko.policies import LegacyRootsPolicy
 from pades_lt_poc.domain.verification import CLAIMED_TIME_WARNING, UNALLOCATED_FREES_NOTE, legacy_sha1_roots
@@ -25,7 +26,7 @@ def verify(client, pdf: bytes, **data):
 def test_verify_trusts_poc_root_and_both_ac_raiz(services):
     """La raíz de la PoC es implícita; las AC Raíz vienen de la carga inicial de la fuente."""
     roots = [c.der for c in services.verify_signatures.trust_roots()]
-    assert roots[0] == services.signer.trust_root.dump()
+    assert roots[0] == pki.entity(pki.ROOT).cert().public_bytes(serialization.Encoding.DER)
     assert AC_RAIZ_2007.dump() in roots
     assert AC_RAIZ_2016.dump() in roots
     assert ONTI.dump() not in roots  # un intermedio nunca es ancla de confianza
