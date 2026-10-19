@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Con conexión sólo se valida a la hora actual: la revocación que se descarga es de hoy."
+  }
+}

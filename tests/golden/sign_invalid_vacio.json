@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "No es un PDF válido o está dañado: PdfReadError: Illegal PDF header"
+  }
+}

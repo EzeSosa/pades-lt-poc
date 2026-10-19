@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "body": {
+    "signatures": [
+      {
+        "field": "Firma1",
+        "type": "Signature",
+        "crypto_valid": false,
+        "intact": false,
+        "valid": true,
+        "error": "el documento fue alterado",
+        "certificates": null,
+        "signature_timestamp": null
+      }
+    ]
+  }
+}

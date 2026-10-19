@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "content_type": "application/pdf",
+  "content_disposition": "attachment; filename=\"contrato _and_-pades-lt.pdf\"; filename*=UTF-8''contrato%20%C3%B1and%C3%BA-pades-lt.pdf",
+  "body": {
+    "field": "Firma1",
+    "reason": "Aprobación",
+    "location": "Córdoba",
+    "subfilter": "/ETSI.CAdES.detached"
+  }
+}

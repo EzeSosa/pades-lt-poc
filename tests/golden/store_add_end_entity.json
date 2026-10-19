@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "La fuente sólo guarda raíces e intermedios (CAs), y esto no lo es: CN=Firmante de Prueba,O=PoC PAdES,C=AR"
+  }
+}

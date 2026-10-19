@@ -1,0 +1,57 @@
+{
+  "status": 200,
+  "body": {
+    "signatures": [
+      {
+        "field": "Firma1",
+        "type": "Signature",
+        "crypto_valid": true,
+        "intact": true,
+        "valid": true,
+        "chain_complete": true,
+        "certificates": [
+          {
+            "type": "end_entity",
+            "source": "cms",
+            "self_signed": false,
+            "subject": "CN=Firmante de Prueba,O=PoC PAdES,C=AR",
+            "issuer": "CN=PoC Intermediate CA,O=PoC PAdES,C=AR",
+            "serial_number": "<serial:signer>",
+            "not_before": "<time>",
+            "not_after": "<time>",
+            "sha256_fingerprint": "<sha256:signer>",
+            "der_b64": "<der:signer>",
+            "in_store": false
+          },
+          {
+            "type": "intermediate",
+            "source": "store",
+            "self_signed": false,
+            "subject": "CN=PoC Intermediate CA,O=PoC PAdES,C=AR",
+            "issuer": "CN=PoC Root CA,O=PoC PAdES,C=AR",
+            "serial_number": "<serial:intermediate>",
+            "not_before": "<time>",
+            "not_after": "<time>",
+            "sha256_fingerprint": "<sha256:intermediate>",
+            "der_b64": "<der:intermediate>",
+            "in_store": true
+          },
+          {
+            "type": "root",
+            "source": "store",
+            "self_signed": true,
+            "subject": "CN=PoC Root CA,O=PoC PAdES,C=AR",
+            "issuer": "CN=PoC Root CA,O=PoC PAdES,C=AR",
+            "serial_number": "<serial:root>",
+            "not_before": "<time>",
+            "not_after": "<time>",
+            "sha256_fingerprint": "<sha256:root>",
+            "der_b64": "<der:root>",
+            "in_store": true
+          }
+        ],
+        "signature_timestamp": null
+      }
+    ]
+  }
+}

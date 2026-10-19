@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "body": {
+    "id": "<id>",
+    "sha256": "<sha256:intermediate>",
+    "kind": "intermediate",
+    "trusted": false,
+    "enabled": false,
+    "origin": "manual",
+    "notes": "en revisión",
+    "subject": "CN=PoC Intermediate CA,O=PoC PAdES,C=AR",
+    "issuer": "CN=PoC Root CA,O=PoC PAdES,C=AR",
+    "not_before": "<time>",
+    "not_after": "<time>",
+    "validity_status": "valid",
+    "created_at": "<time>",
+    "updated_at": "<time>",
+    "der_b64": "<der:intermediate>"
+  }
+}

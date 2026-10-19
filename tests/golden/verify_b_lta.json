@@ -1,0 +1,67 @@
+{
+  "status": 200,
+  "body": {
+    "validation_time": {
+      "mode": "now",
+      "warning": null
+    },
+    "diff_policy": {
+      "mode": "default",
+      "note": null
+    },
+    "revocation": {
+      "mode": "offline",
+      "fetched": null,
+      "note": null
+    },
+    "pades_level": "PAdES B-LTA",
+    "dss": {
+      "Certs": 5,
+      "OCSPs": 2,
+      "CRLs": 1
+    },
+    "certificate_store": {
+      "trusted_roots": 3,
+      "intermediates": 1,
+      "self_contained": true,
+      "note": null
+    },
+    "signatures": [
+      {
+        "field": "Firma1",
+        "type": "Signature",
+        "subfilter": "/ETSI.CAdES.detached",
+        "signer": "Common Name: Firmante de Prueba, Organization: PoC PAdES, Country: AR",
+        "bottom_line": true,
+        "intact": true,
+        "valid": true,
+        "trusted": true,
+        "trust_problem": null,
+        "coverage": "ENTIRE_REVISION",
+        "completed_from_store": [],
+        "modifications": {
+          "level": "LTA_UPDATES",
+          "docmdp_ok": true,
+          "suspicious": null
+        },
+        "validated_at": {
+          "time": "<time>",
+          "source": "now"
+        },
+        "signature_timestamp": {
+          "time": "<time>",
+          "tsa": "Common Name: PoC Time Stamping Authority, Organization: PoC PAdES, Country: AR",
+          "valid": true,
+          "trusted": true,
+          "trust_problem": null,
+          "completed_from_store": []
+        },
+        "details": "Signer info\n-----------\nCertificate subject: \"Common Name: Firmante de Prueba, Organization: PoC PAdES, Country: AR\"\nCertificate SHA1 fingerprint: <sha1:signer>\nCertificate SHA256 fingerprint: <sha256:signer>\nTrust anchor: \"Common Name: PoC Root CA, Organization: PoC PAdES, Country: AR\"\nThe signer's certificate is trusted.\n\n\nIntegrity\n---------\nThe signature is cryptographically sound.\n\nThe digest algorithm used was 'sha256'.\nThe signature mechanism used was 'sha256_rsa'.\n\n\nSigning time\n------------\nSigning time as reported by signer: <time>\n\nSignature timestamp token: <time>\nThe token is guaranteed to be newer than the signature.\nThis timestamp is backed by a time stamping authority.\nThe timestamp token is cryptographically sound.\nTSA certificate subject: \"Common Name: PoC Time Stamping Authority, Organization: PoC PAdES, Country: AR\"\nTSA certificate SHA1 fingerprint: <sha1:tsa>\nTSA certificate SHA256 fingerprint: <sha256:tsa>\nTSA cert trust anchor: \"Common Name: PoC Root CA, Organization: PoC PAdES, Country: AR\"\nThe TSA certificate is trusted.\n\n\nModifications\n-------------\nThe signature does not cover the entire file.\nAll modifications relate to signature maintenance, and they appear to be compatible with the current document modification policy.\n\n\nBottom line\n-----------\nThe signature is judged VALID.\n\n"
+      },
+      {
+        "field": "Timestamp-<uuid>",
+        "type": "DocTimeStamp"
+      }
+    ]
+  }
+}

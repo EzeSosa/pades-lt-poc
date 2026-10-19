@@ -1,0 +1,178 @@
+{
+  "status": 200,
+  "body": {
+    "certificates": [
+      {
+        "version": 3,
+        "serial_number": "1b0000000c73ccb952640e9af100000000000c",
+        "subject": [
+          {
+            "oid": "2.5.4.6",
+            "name": "countryName",
+            "value": "AR"
+          },
+          {
+            "oid": "2.5.4.8",
+            "name": "stateOrProvinceName",
+            "value": "Ciudad Autónoma de Buenos Aires"
+          },
+          {
+            "oid": "2.5.4.11",
+            "name": "organizationalUnitName",
+            "value": "Subsecretaría de Tecnologías de Gestión"
+          },
+          {
+            "oid": "2.5.4.11",
+            "name": "organizationalUnitName",
+            "value": "Secretaría de Gestión Pública"
+          },
+          {
+            "oid": "2.5.4.11",
+            "name": "organizationalUnitName",
+            "value": "Oficina Nacional de Tecnologías de Información"
+          },
+          {
+            "oid": "2.5.4.10",
+            "name": "organizationName",
+            "value": "Jefatura de Gabinete de Ministros"
+          },
+          {
+            "oid": "2.5.4.5",
+            "name": "serialNumber",
+            "value": "CUIT 30680604572"
+          },
+          {
+            "oid": "2.5.4.3",
+            "name": "commonName",
+            "value": "Autoridad Certificante de Firma Digital"
+          }
+        ],
+        "issuer": [
+          {
+            "oid": "2.5.4.6",
+            "name": "countryName",
+            "value": "AR"
+          },
+          {
+            "oid": "2.5.4.10",
+            "name": "organizationName",
+            "value": "Infraestructura de Firma Digital"
+          },
+          {
+            "oid": "2.5.4.3",
+            "name": "commonName",
+            "value": "AC Raíz"
+          }
+        ],
+        "subject_rfc4514": "CN=Autoridad Certificante de Firma Digital,2.5.4.5=CUIT 30680604572,O=Jefatura de Gabinete de Ministros,OU=Oficina Nacional de Tecnologías de Información,OU=Secretaría de Gestión Pública,OU=Subsecretaría de Tecnologías de Gestión,ST=Ciudad Autónoma de Buenos Aires,C=AR",
+        "issuer_rfc4514": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
+        "self_signed": false,
+        "is_ca": true,
+        "validity": {
+          "not_before": "<time>",
+          "not_after": "<time>",
+          "status": "valid",
+          "days_left": "<days>"
+        },
+        "signature_algorithm": "sha1WithRSAEncryption",
+        "public_key": {
+          "type": "RSA",
+          "size": 4096
+        },
+        "fingerprints": {
+          "sha1": "<sha1:seed-ac-onti-firma-digital>",
+          "sha256": "<sha256:seed-ac-onti-firma-digital>"
+        },
+        "extensions": [
+          {
+            "oid": "1.3.6.1.4.1.311.21.1",
+            "name": "msCAVersion",
+            "critical": false,
+            "values": [
+              "1"
+            ]
+          },
+          {
+            "oid": "1.3.6.1.4.1.311.21.2",
+            "name": "msPreviousCACertHash",
+            "critical": false,
+            "values": [
+              "<hex>"
+            ]
+          },
+          {
+            "oid": "2.5.29.14",
+            "name": "subjectKeyIdentifier",
+            "critical": false,
+            "values": [
+              "<hex>"
+            ]
+          },
+          {
+            "oid": "2.5.29.32",
+            "name": "certificatePolicies",
+            "critical": false,
+            "values": [
+              "Política 2.16.32.1.1.3",
+              "CPS: http://pki.jgm.gov.ar/cps/cps.pdf",
+              "CPS: http://pkicont.jgm.gov.ar/cps/cps.pdf",
+              "Aviso: Certificado emitido por un certificador licenciado en el marco de la ley 25.506"
+            ]
+          },
+          {
+            "oid": "1.3.6.1.4.1.311.20.2",
+            "name": "msCertificateTemplateName",
+            "critical": false,
+            "values": [
+              "SubCA"
+            ]
+          },
+          {
+            "oid": "2.5.29.15",
+            "name": "keyUsage",
+            "critical": true,
+            "values": [
+              "key_cert_sign",
+              "crl_sign"
+            ]
+          },
+          {
+            "oid": "2.5.29.19",
+            "name": "basicConstraints",
+            "critical": true,
+            "values": [
+              "CA=sí, pathLen=0"
+            ]
+          },
+          {
+            "oid": "2.5.29.35",
+            "name": "authorityKeyIdentifier",
+            "critical": false,
+            "values": [
+              "<hex>"
+            ]
+          },
+          {
+            "oid": "2.5.29.31",
+            "name": "cRLDistributionPoints",
+            "critical": false,
+            "values": [
+              "http://acraiz.cdp1.gov.ar/ca.crl",
+              "http://acraiz.cdp2.gov.ar/ca.crl"
+            ]
+          },
+          {
+            "oid": "1.3.6.1.5.5.7.1.1",
+            "name": "authorityInfoAccess",
+            "critical": false,
+            "values": [
+              "caIssuers: http://acraiz.gov.ar/ca.crt"
+            ]
+          }
+        ],
+        "der_b64": "<der:seed-ac-onti-firma-digital>",
+        "in_store": true
+      }
+    ]
+  }
+}

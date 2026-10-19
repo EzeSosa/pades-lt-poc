@@ -1,0 +1,6 @@
+{
+  "status": 404,
+  "body": {
+    "detail": "No hay un certificado con id <id> en la fuente"
+  }
+}

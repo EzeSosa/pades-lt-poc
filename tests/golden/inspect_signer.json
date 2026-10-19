@@ -1,0 +1,118 @@
+{
+  "status": 200,
+  "body": {
+    "certificates": [
+      {
+        "version": 3,
+        "serial_number": "<serial:signer>",
+        "subject": [
+          {
+            "oid": "2.5.4.6",
+            "name": "countryName",
+            "value": "AR"
+          },
+          {
+            "oid": "2.5.4.10",
+            "name": "organizationName",
+            "value": "PoC PAdES"
+          },
+          {
+            "oid": "2.5.4.3",
+            "name": "commonName",
+            "value": "Firmante de Prueba"
+          }
+        ],
+        "issuer": [
+          {
+            "oid": "2.5.4.6",
+            "name": "countryName",
+            "value": "AR"
+          },
+          {
+            "oid": "2.5.4.10",
+            "name": "organizationName",
+            "value": "PoC PAdES"
+          },
+          {
+            "oid": "2.5.4.3",
+            "name": "commonName",
+            "value": "PoC Intermediate CA"
+          }
+        ],
+        "subject_rfc4514": "CN=Firmante de Prueba,O=PoC PAdES,C=AR",
+        "issuer_rfc4514": "CN=PoC Intermediate CA,O=PoC PAdES,C=AR",
+        "self_signed": false,
+        "is_ca": false,
+        "validity": {
+          "not_before": "<time>",
+          "not_after": "<time>",
+          "status": "valid",
+          "days_left": "<days>"
+        },
+        "signature_algorithm": "sha256WithRSAEncryption",
+        "public_key": {
+          "type": "RSA",
+          "size": 3072
+        },
+        "fingerprints": {
+          "sha1": "<sha1:signer>",
+          "sha256": "<sha256:signer>"
+        },
+        "extensions": [
+          {
+            "oid": "2.5.29.14",
+            "name": "subjectKeyIdentifier",
+            "critical": false,
+            "values": [
+              "<ski:signer>"
+            ]
+          },
+          {
+            "oid": "2.5.29.19",
+            "name": "basicConstraints",
+            "critical": true,
+            "values": [
+              "CA=no"
+            ]
+          },
+          {
+            "oid": "2.5.29.35",
+            "name": "authorityKeyIdentifier",
+            "critical": false,
+            "values": [
+              "<aki:ocsp>"
+            ]
+          },
+          {
+            "oid": "2.5.29.15",
+            "name": "keyUsage",
+            "critical": true,
+            "values": [
+              "digital_signature",
+              "content_commitment"
+            ]
+          },
+          {
+            "oid": "2.5.29.31",
+            "name": "cRLDistributionPoints",
+            "critical": false,
+            "values": [
+              "<base_url>/pki/intermediate.crl"
+            ]
+          },
+          {
+            "oid": "1.3.6.1.5.5.7.1.1",
+            "name": "authorityInfoAccess",
+            "critical": false,
+            "values": [
+              "OCSP: <base_url>/ocsp",
+              "caIssuers: <base_url>/pki/intermediate.crt"
+            ]
+          }
+        ],
+        "der_b64": "<der:signer>",
+        "in_store": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "status": 200,
+  "body": {
+    "validation_time": {
+      "mode": "now",
+      "warning": null
+    },
+    "diff_policy": {
+      "mode": "default",
+      "note": null
+    },
+    "revocation": {
+      "mode": "offline",
+      "fetched": null,
+      "note": null
+    },
+    "pades_level": "PAdES B-B",
+    "dss": null,
+    "certificate_store": {
+      "trusted_roots": 3,
+      "intermediates": 1,
+      "self_contained": true,
+      "note": null
+    },
+    "signatures": [
+      {
+        "field": "Firma1",
+        "type": "Signature",
+        "subfilter": "/ETSI.CAdES.detached",
+        "signer": "Common Name: Firmante de Prueba, Organization: PoC PAdES, Country: AR",
+        "bottom_line": false,
+        "intact": true,
+        "valid": true,
+        "trusted": false,
+        "trust_problem": {
+          "reason": "missing_revocation",
+          "indication": "CERTIFICATE_CHAIN_GENERAL_FAILURE",
+          "summary": "El PDF no trae revocación (CRL u OCSP) para algún certificado de la cadena, y sin conexión no se puede conseguir.",
+          "hint": "Probá validar con conexión, que descarga CRL y OCSP actualizadas.",
+          "paths": [
+            {
+              "chain": [
+                {
+                  "subject": "Firmante de Prueba",
+                  "not_after": "<time>",
+                  "sha256": "<sha256:signer>"
+                },
+                {
+                  "subject": "PoC Intermediate CA",
+                  "not_after": "<time>",
+                  "sha256": "<sha256:intermediate>"
+                },
+                {
+                  "subject": "PoC Root CA",
+                  "not_after": "<time>",
+                  "sha256": "<sha256:root>"
+                }
+              ],
+              "reason": "missing_revocation",
+              "message": "The path could not be validated because no revocation information could be found for intermediate certificate 1 Common Name: PoC Intermediate CA, Organization: PoC PAdES, Country: AR"
+            }
+          ]
+        },
+        "coverage": "ENTIRE_FILE",
+        "completed_from_store": [],
+        "modifications": {
+          "level": "NONE",
+          "docmdp_ok": true,
+          "suspicious": null
+        },
+        "validated_at": {
+          "time": "<time>",
+          "source": "now"
+        },
+        "signature_timestamp": null,
+        "details": "Signer info\n-----------\nCertificate subject: \"Common Name: Firmante de Prueba, Organization: PoC PAdES, Country: AR\"\nCertificate SHA1 fingerprint: <sha1:signer>\nCertificate SHA256 fingerprint: <sha256:signer>\nTrust anchor: \"Common Name: PoC Root CA, Organization: PoC PAdES, Country: AR\"\nThe signer's certificate is untrusted.\n\n\nIntegrity\n---------\nThe signature is cryptographically sound.\n\nThe digest algorithm used was 'sha256'.\nThe signature mechanism used was 'sha256_rsa'.\n\n\nSigning time\n------------\nSigning time as reported by signer: <time>\n\n\nModifications\n-------------\nThe signature covers the entire file.\n\n\nBottom line\n-----------\nThe signature is judged INVALID.\n\n"
+      }
+    ]
+  }
+}

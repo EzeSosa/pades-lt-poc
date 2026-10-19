@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Sólo una raíz puede ser ancla de confianza"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "status": 200,
+  "body": {
+    "signatures": [
+      {
+        "field": "Firma1",
+        "type": "Signature",
+        "crypto_valid": true,
+        "intact": true,
+        "valid": true,
+        "chain_complete": false,
+        "certificates": [
+          {
+            "type": "end_entity",
+            "source": "cms",
+            "self_signed": false,
+            "subject": "CN=Firmante de Prueba,O=PoC PAdES,C=AR",
+            "issuer": "CN=PoC Intermediate CA,O=PoC PAdES,C=AR",
+            "serial_number": "<serial:signer>",
+            "not_before": "<time>",
+            "not_after": "<time>",
+            "sha256_fingerprint": "<sha256:signer>",
+            "der_b64": "<der:signer>",
+            "in_store": false
+          }
+        ],
+        "aia_errors": [
+          "<base_url>/pki/intermediate.crt: sin red en los tests: <base_url>/pki/intermediate.crt"
+        ],
+        "signature_timestamp": null
+      }
+    ]
+  }
+}

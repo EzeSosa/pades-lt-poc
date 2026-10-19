@@ -26,9 +26,30 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
+    "import-linter>=2.15",
     "pytest>=9.1.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]  # para reusar minimal_pdf() de scripts/demo.py
+pythonpath = ["scripts"]  # para reusar minimal_pdf() de scripts/demo.py y el runner de la suite de PDFs
+markers = ["suite: la suite de PDFs de prueba (testdata/pdf-suite); `-m \"not suite\"` la saltea"]
+
+# Reglas de dependencias entre módulos (docs/adr/0001-arquitectura-hexagonal.md). Las corre
+# tests/test_architecture.py; a mano: `uv run lint-imports`. Cada fase de la migración agrega
+# las suyas a medida que aparecen las capas.
+[tool.importlinter]
+root_package = "pades_lt_poc"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "La lógica no depende de HTTP"
+type = "forbidden"
+source_modules = ["pades_lt_poc.services", "pades_lt_poc.pki"]
+forbidden_modules = ["pades_lt_poc.app", "pades_lt_poc.dependencies", "pades_lt_poc.routers", "fastapi", "starlette", "uvicorn"]
+
+[[tool.importlinter.contracts]]
+name = "La mini PKI no depende de la lógica"
+type = "forbidden"
+source_modules = ["pades_lt_poc.pki"]
+forbidden_modules = ["pades_lt_poc.services"]

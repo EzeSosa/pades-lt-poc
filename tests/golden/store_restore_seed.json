@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "added": [
+      {
+        "id": "<id>",
+        "sha256": "<sha256:seed-ac-raiz-argentina-2016>",
+        "kind": "root",
+        "trusted": true,
+        "enabled": true,
+        "origin": "seed",
+        "notes": "AC Raíz de la Infraestructura de Firma Digital de Argentina (2016).",
+        "subject": "CN=AC Raíz de la República Argentina,O=Infraestructura de Firma Digital de la República Argentina,C=AR",
+        "issuer": "CN=AC Raíz de la República Argentina,O=Infraestructura de Firma Digital de la República Argentina,C=AR",
+        "not_before": "<time>",
+        "not_after": "<time>",
+        "validity_status": "valid",
+        "created_at": "<time>",
+        "updated_at": "<time>",
+        "der_b64": "<der:seed-ac-raiz-argentina-2016>"
+      }
+    ]
+  }
+}

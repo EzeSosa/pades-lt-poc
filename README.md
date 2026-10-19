@@ -89,6 +89,12 @@ uv run pytest
 
 Los tests generan su propia PKI en una carpeta temporal (no tocan `./pki`) y firman los PDFs en el mismo proceso con la TSA de la app, así que no hace falta tener el server levantado.
 
+Además de los tests de cada endpoint hay tres redes de seguridad, pensadas para la migración a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)):
+
+- **Contrato** (`tests/test_contract.py`): la respuesta JSON completa de cada endpoint en los casos clave, comparada contra `tests/golden/`. Lo que cambia en cada corrida (huellas, seriales y DER de la PKI de prueba, horas, ids, el puerto) se normaliza a marcadores como `<sha256:signer>` antes de comparar. Si un cambio de contrato es buscado, `UPDATE_GOLDEN=1 uv run pytest tests/test_contract.py` regenera los goldens; revisá el diff antes de commitear.
+- **Suite de PDFs** (`tests/test_pdf_suite.py`): los 40 casos de [testdata/pdf-suite](testdata/pdf-suite/README.md) contra `/sign` y `/verify`, con el mismo chequeo que `scripts/run_pdf_suite.py`. Tarda más de un minuto; `uv run pytest -m "not suite"` la saltea.
+- **Arquitectura** (`tests/test_architecture.py`): las reglas de dependencias entre módulos de `[tool.importlinter]` en `pyproject.toml`. A mano: `uv run lint-imports`.
+
 ## Docker
 
 ```powershell
@@ -103,6 +109,8 @@ La imagen copia el código al construirse: después de cambiar algo, `docker com
 La PKI, con sus claves, y la fuente de certificados (`certs.db`) viven en el volumen `/data`. `PUBLIC_BASE_URL` queda **grabada en los certificados** (URLs de CRL, AIA y OCSP) al generarse la PKI, así que tiene que ser alcanzable desde el propio contenedor (la app se consulta a sí misma al firmar) y desde quien valide las firmas. Si la cambiás, regenerá la PKI con `down -v`.
 
 ## Estructura
+
+> **Migración en curso** a arquitectura hexagonal ([ADR-0001](docs/adr/0001-arquitectura-hexagonal.md)). Estado: **paso 0, red de seguridad** (tests de contrato, suite de PDFs y reglas de dependencias). Todavía no se movió código: la estructura de abajo es la vigente.
 
 ```
 src/pades_lt_poc/

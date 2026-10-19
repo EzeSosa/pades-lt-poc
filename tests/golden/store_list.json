@@ -1,0 +1,64 @@
+{
+  "status": 200,
+  "body": {
+    "summary": {
+      "total": 3,
+      "trusted_roots": 2,
+      "intermediates": 1,
+      "disabled": 0
+    },
+    "certificates": [
+      {
+        "id": "<id>",
+        "sha256": "<sha256:seed-ac-raiz-argentina-2016>",
+        "kind": "root",
+        "trusted": true,
+        "enabled": true,
+        "origin": "seed",
+        "notes": "AC Raíz de la Infraestructura de Firma Digital de Argentina (2016).",
+        "subject": "CN=AC Raíz de la República Argentina,O=Infraestructura de Firma Digital de la República Argentina,C=AR",
+        "issuer": "CN=AC Raíz de la República Argentina,O=Infraestructura de Firma Digital de la República Argentina,C=AR",
+        "not_before": "<time>",
+        "not_after": "<time>",
+        "validity_status": "valid",
+        "created_at": "<time>",
+        "updated_at": "<time>",
+        "der_b64": "<der:seed-ac-raiz-argentina-2016>"
+      },
+      {
+        "id": "<id>",
+        "sha256": "<sha256:seed-ac-raiz-argentina-2007>",
+        "kind": "root",
+        "trusted": true,
+        "enabled": true,
+        "origin": "seed",
+        "notes": "AC Raíz de la Infraestructura de Firma Digital de Argentina (2007). Firma con SHA-1 a sus CAs.",
+        "subject": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
+        "issuer": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
+        "not_before": "<time>",
+        "not_after": "<time>",
+        "validity_status": "valid",
+        "created_at": "<time>",
+        "updated_at": "<time>",
+        "der_b64": "<der:seed-ac-raiz-argentina-2007>"
+      },
+      {
+        "id": "<id>",
+        "sha256": "<sha256:seed-ac-onti-firma-digital>",
+        "kind": "intermediate",
+        "trusted": false,
+        "enabled": true,
+        "origin": "seed",
+        "notes": "AC de Firma Digital de la ONTI, emitida por la AC Raíz 2007. Emite los certificados de CiDi.",
+        "subject": "CN=Autoridad Certificante de Firma Digital,2.5.4.5=CUIT 30680604572,O=Jefatura de Gabinete de Ministros,OU=Oficina Nacional de Tecnologías de Información,OU=Secretaría de Gestión Pública,OU=Subsecretaría de Tecnologías de Gestión,ST=Ciudad Autónoma de Buenos Aires,C=AR",
+        "issuer": "CN=AC Raíz,O=Infraestructura de Firma Digital,C=AR",
+        "not_before": "<time>",
+        "not_after": "<time>",
+        "validity_status": "valid",
+        "created_at": "<time>",
+        "updated_at": "<time>",
+        "der_b64": "<der:seed-ac-onti-firma-digital>"
+      }
+    ]
+  }
+}

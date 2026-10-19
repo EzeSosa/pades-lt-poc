@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "No es un certificado DER, PEM, PKCS#7 ni base64 de un DER"
+  }
+}

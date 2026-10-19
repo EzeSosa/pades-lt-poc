@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "body": {
+    "detail": "Mandá un archivo `crt` o un `b64`, uno solo de los dos"
+  }
+}
