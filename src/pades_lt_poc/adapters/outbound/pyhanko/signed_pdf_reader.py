@@ -10,6 +10,7 @@ from collections.abc import Callable
 from io import BytesIO
 
 from asn1crypto import cms
+from pyhanko.pdf_utils.crypt import AuthStatus, PubKeySecurityHandler
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign.validation import DocumentSecurityStore
 from pyhanko.sign.validation.errors import SignatureValidationError
@@ -26,9 +27,27 @@ from ....domain.signatures import CmsSignature, EmbeddedSignature, Integrity, Si
 from .convert import CertificateConverter
 
 
+def open_pdf(data: bytes) -> PdfFileReader:
+    """El PDF abierto con pyHanko (sin modo estricto) y, si está cifrado, autenticado con la contraseña vacía.
+
+    Lanza `UnprocessablePdf` si no es un PDF que se pueda leer, o si hace falta una contraseña o un
+    certificado para abrirlo (D-03).
+    """
+    try:
+        reader = PdfFileReader(BytesIO(data), strict=False)
+    except Exception as e:  # noqa: BLE001 - cualquier error de lectura es un PDF inválido
+        raise UnprocessablePdf(f"No es un PDF válido o está dañado: {type(e).__name__}: {e}") from e
+    handler = reader.security_handler
+    if isinstance(handler, PubKeySecurityHandler):
+        raise UnprocessablePdf("El PDF está cifrado para certificados (/Adobe.PubSec): sin la clave del destinatario no se puede leer.")
+    if handler is not None and reader.decrypt("").status is AuthStatus.FAILED:
+        raise UnprocessablePdf("El PDF está cifrado con contraseña de apertura: sin ella no se puede leer ni validar.")
+    return reader
+
+
 def open_signed_pdf(data: bytes) -> PdfFileReader:
-    """El PDF abierto con pyHanko (sin modo estricto). Lanza `UnprocessablePdf` si no tiene firmas."""
-    reader = PdfFileReader(BytesIO(data), strict=False)
+    """Como `open_pdf`, y además lanza `UnprocessablePdf` si no tiene firmas (V-10)."""
+    reader = open_pdf(data)
     if not reader.embedded_signatures:
         raise UnprocessablePdf("El PDF no tiene firmas")
     return reader

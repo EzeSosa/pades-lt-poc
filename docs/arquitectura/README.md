@@ -1,6 +1,6 @@
 # Arquitectura
 
-Este documento describe cómo está organizado el código, qué puede depender de qué y por qué. Las decisiones de fondo están en los [ADRs](../adr/README.md): la arquitectura hexagonal en [ADR-0001](../adr/0001-arquitectura-hexagonal.md), el certificado de dominio en [ADR-0002](../adr/0002-certificado-de-dominio-sobre-der.md) y el testbed en [ADR-0003](../adr/0003-testbed-fuera-del-nucleo.md). Los conceptos de firma digital están en [pades.md](../pades.md).
+Este documento describe cómo está organizado el código, qué puede depender de qué y por qué. Las decisiones de fondo están en los [ADRs](../adr/README.md): la arquitectura hexagonal en [ADR-0001](../adr/0001-arquitectura-hexagonal.md), el certificado de dominio en [ADR-0002](../adr/0002-certificado-de-dominio-sobre-der.md) y el testbed en [ADR-0003](../adr/0003-testbed-fuera-del-nucleo.md). Los conceptos de firma digital están en [pades.md](../pades.md), y la estructura interna del PDF en [pdf.md](../pdf.md).
 
 | Documento | Contenido |
 |-----------|-----------|
@@ -21,12 +21,13 @@ Este documento describe cómo está organizado el código, qué puede depender d
           ┌─────────────────────────────▼─────────────────────────────┐
           │ application/                                              │
           │   use_cases/: SignPdf · VerifySignatures ·                │
-          │     ExtractCertificateChains · InspectCertificates ·      │
-          │     CertificateSource                                     │
+          │     AnalyzeDocument · ExtractCertificateChains ·          │
+          │     InspectCertificates · CertificateSource               │
           │   ports.py: lo que los casos de uso necesitan de afuera   │
           │ ┌───────────────────────────────────────────────────────┐ │
           │ │ domain/  Python puro: certificados, firmas, cadenas,  │ │
-          │ │ validación, firma, fuente; reglas F, V, C, S; errores │ │
+          │ │ validación, documento, firma, fuente; reglas F, V, D, │ │
+          │ │ C, S; errores                                         │ │
           │ └───────────────────────────────────────────────────────┘ │
           └─────────────────────────────┬─────────────────────────────┘
                                         │ puertos (Protocols)
@@ -51,6 +52,7 @@ src/pades_lt_poc/
 │   ├── signatures.py         las firmas de un PDF: SignedDocument, CmsSignature, Integrity, TimestampToken
 │   ├── chains.py             armado de cadenas sin exigir confianza: reglas C-01 a C-03
 │   ├── verification.py       validación: opciones, anclas, motivo de desconfianza, nivel PAdES (V-01 a V-10)
+│   ├── document.py           el documento: protección, formulario, revisiones, contenido activo y hallazgos (D-01 a D-10)
 │   ├── signing.py            firma: perfil, campo libre, PDFs cifrados (S-01 a S-04)
 │   ├── source.py             la fuente de certificados: entradas, TrustSnapshot, reglas F-01 a F-06
 │   └── errors.py             errores de negocio
@@ -59,6 +61,7 @@ src/pades_lt_poc/
 │   └── use_cases/            un caso de uso por operación (casos-de-uso.md)
 │       ├── sign_pdf.py               SignPdf (/sign)
 │       ├── verify_signatures.py      VerifySignatures (/verify)
+│       ├── analyze_document.py       AnalyzeDocument (/document)
 │       ├── certificate_chains.py     ExtractCertificateChains (/certificates)
 │       ├── inspect_certificates.py   InspectCertificates (/certificates/inspect)
 │       └── certificate_source.py     CertificateSource (/store): ABM, carga inicial y snapshot
@@ -66,9 +69,9 @@ src/pades_lt_poc/
 │   ├── inbound/http/         la API: un módulo de endpoints por área con sus presenters,
 │   │                         dependencies.py (inyección) y ui.py (las páginas de /ui)
 │   └── outbound/
-│       ├── pyhanko/          SignatureValidator, SignedPdfReader y PdfSigningEngine con pyHanko:
-│       │                     validator, signer, signed_pdf_reader, policies, trust_paths,
-│       │                     fetching (CRL/OCSP/AIA con conexión), crl_index, convert
+│       ├── pyhanko/          SignatureValidator, SignedPdfReader, PdfInspector y PdfSigningEngine con pyHanko:
+│       │                     validator, signer, signed_pdf_reader, document_inspector, policies,
+│       │                     trust_paths, fetching (CRL/OCSP/AIA con conexión), crl_index, convert
 │       ├── crypto/           CertificateCodec con cryptography: codec (parseo, emisor), details
 │       ├── sqlite/           CertificateRepository en SQLite
 │       ├── http/             IssuerFetcher (AIA) con requests
@@ -99,6 +102,7 @@ create_app(settings)                       importar app.py no lee nada ni crea n
                ├── SignPdf(PyHankoPdfSigner.from_files(clave, cert y cadena del firmante, raíz de la PoC))
                ├── VerifySignatures(PyHankoSignatureValidator(codec, fetchers con el CrlCache),
                │                    source, [raíz de la PoC], clock)
+               ├── AnalyzeDocument(PyHankoPdfInspector())
                ├── ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher)
                └── InspectCertificates(codec, source)
          app.state.services = Services          lo leen adapters/inbound/http/dependencies.py y el testbed

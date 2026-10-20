@@ -6,7 +6,8 @@ forma de la respuesta (un campo que falta, un orden distinto, un mensaje reescri
 
 La PKI de prueba se regenera en cada corrida, así que antes de comparar se normaliza lo que
 cambia: huellas, seriales, DER y key ids de sus certificados (por un nombre estable, como
-`<sha256:signer>`), horas, ids de la fuente y días restantes. La vigencia de los certificados de
+`<sha256:signer>`), horas, ids de la fuente, días restantes y los offsets y tamaños en bytes del
+análisis del documento. La vigencia de los certificados de
 la carga inicial también, porque depende del calendario. Los certificados de la carga
 inicial también se nombran, para que se lea qué es cada uno.
 
@@ -44,6 +45,11 @@ TIME_ON_DATE = re.compile(r"\d{2}:\d{2}:\d{2} on \d{4}-\d{2}-\d{2}")  # mensajes
 HEX_COLON = re.compile(r"\b(?:[0-9A-Fa-f]{2}:){7,}[0-9A-Fa-f]{2}\b")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")  # campo de un DocTimeStamp
 STORE_ID = re.compile(r"\bid [\d, ]*\d")
+PDF_DATE = re.compile(r"D:\d{14}(?:Z|[+-]\d{2}'\d{2}'?)?")  # /M del diccionario de firma
+# Offsets y tamaños en bytes del análisis del documento: dependen del largo del CMS y de las
+# respuestas OCSP, que cambian con la PKI de cada corrida.
+BYTE_KEYS = {"end_offset", "byte_range", "capacity", "used"}
+VRI_KEY = re.compile(r"/VRI/[0-9A-F]{40}")  # la clave VRI es el SHA-1 del /Contents de cada firma
 
 
 # --------------------------------------------------------------------------- normalización
@@ -87,6 +93,8 @@ def _seed_validity(entry: dict) -> None:
 
 
 def normalize(value, aliases: dict[str, str], key: str | None = None):
+    if key in BYTE_KEYS:
+        return f"<{key}>"
     if isinstance(value, dict):
         out = {k: normalize(v, aliases, k) for k, v in value.items()}
         _seed_validity(out)
@@ -95,6 +103,9 @@ def normalize(value, aliases: dict[str, str], key: str | None = None):
             out = {k: sorted(v, key=lambda e: json.dumps(e, sort_keys=True)) for k, v in out.items()}
         return out
     if isinstance(value, list):
+        if key == "keys":
+            # pyHanko reescribe /ModDate del /Info en cada revisión: sólo cambia si pasó un segundo.
+            value = [k for k in value if k != "/ModDate"]
         return [normalize(v, aliases) for v in value]
     if key == "id" and isinstance(value, int):
         return "<id>"
@@ -107,7 +118,8 @@ def normalize(value, aliases: dict[str, str], key: str | None = None):
     # Los textos largos (detalle de pyHanko, mensajes) pueden traer valores variables adentro.
     for raw in sorted((a for a in aliases if len(a) >= 8 and a in value), key=len, reverse=True):
         value = value.replace(raw, aliases[raw])
-    value = TIME_ON_DATE.sub("<time>", TIME.sub("<time>", value))
+    value = PDF_DATE.sub("<time>", TIME_ON_DATE.sub("<time>", TIME.sub("<time>", value)))
+    value = VRI_KEY.sub("/VRI/<vri>", value)
     value = UUID.sub("<uuid>", HEX_COLON.sub("<hex>", value))
     return STORE_ID.sub("id <id>", value)
 
@@ -208,6 +220,15 @@ def test_verify_b_lt(check, client, pki_server, pdf):
 
 def test_verify_b_lta(check, client, pki_server, pdf):
     check("verify_b_lta", *post_pdf(client, "/verify", sign_via_api(pki_server, pdf, lta="true")))
+
+
+def test_document_b_lta(check, client, pki_server, pdf):
+    check("document_b_lta", *post_pdf(client, "/document", sign_via_api(pki_server, pdf, lta="true")))
+
+
+def test_document_open_password(check, client):
+    s01 = Path(__file__).parent.parent / "testdata/pdf-suite/seguridad/S01-cifrado-con-clave-de-apertura.pdf"
+    check("document_open_password", *post_pdf(client, "/document", s01.read_bytes()))
 
 
 def test_verify_without_dss(check, client, pdf):

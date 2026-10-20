@@ -19,6 +19,7 @@ from .adapters.outbound.clock import SystemClock
 from .adapters.outbound.crypto.codec import CryptographyCertificateCodec
 from .adapters.outbound.http.issuer_fetcher import HttpIssuerFetcher
 from .adapters.outbound.pyhanko import crl_index
+from .adapters.outbound.pyhanko.document_inspector import PyHankoPdfInspector
 from .adapters.outbound.pyhanko.fetching import CrlCache, RevocationFetcherBackend
 from .adapters.outbound.pyhanko.signed_pdf_reader import PyHankoSignedPdfReader
 from .adapters.outbound.pyhanko.signer import PyHankoPdfSigner
@@ -26,6 +27,7 @@ from .adapters.outbound.pyhanko.validator import PyHankoSignatureValidator
 from .adapters.outbound.seed_catalog import PackagedSeedCatalog
 from .adapters.outbound.sqlite.certificate_repository import SqliteCertificateRepository
 from .application.ports import Clock, IssuerFetcher
+from .application.use_cases.analyze_document import AnalyzeDocument
 from .application.use_cases.certificate_chains import ExtractCertificateChains
 from .application.use_cases.certificate_source import CertificateSource
 from .application.use_cases.inspect_certificates import InspectCertificates
@@ -46,6 +48,7 @@ class Services:
     source: CertificateSource
     sign_pdf: SignPdf
     verify_signatures: VerifySignatures
+    analyze_document: AnalyzeDocument
     extract_chains: ExtractCertificateChains
     inspect_certificates: InspectCertificates
 
@@ -97,6 +100,7 @@ def build(settings: Settings, *, clock: Clock | None = None, issuer_fetcher: Iss
         source=source,
         sign_pdf=SignPdf(signer),
         verify_signatures=VerifySignatures(validator, source, [poc_root], clock),
+        analyze_document=AnalyzeDocument(PyHankoPdfInspector()),
         extract_chains=ExtractCertificateChains(PyHankoSignedPdfReader(codec), codec, source, issuer_fetcher),
         inspect_certificates=InspectCertificates(codec, source),
     )

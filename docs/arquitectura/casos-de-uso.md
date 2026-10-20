@@ -8,6 +8,7 @@ Un caso de uso es una operación de negocio: recibe lo que pide quien la usa, ap
 | [`ExtractCertificateChains`](#extractcertificatechains-la-cadena-de-cada-firma) | `POST /certificates` | `SignedPdfReader`, `CertificateCodec`, `IssuerFetcher` (y el snapshot de `CertificateSource`) |
 | [`InspectCertificates`](#inspectcertificates-el-detalle-de-un-certificado) | `POST /certificates/inspect` | `CertificateCodec` (y el snapshot de `CertificateSource`) |
 | [`VerifySignatures`](#verifysignatures-validar-las-firmas-de-un-pdf) | `POST /verify` | `SignatureValidator`, `Clock` (y el snapshot de `CertificateSource`) |
+| [`AnalyzeDocument`](#analyzedocument-el-análisis-del-documento) | `POST /document` | `PdfInspector` |
 | [`SignPdf`](#signpdf-firmar-un-pdf) | `POST /sign` | `PdfSigningEngine` |
 
 ## `CertificateSource`: la fuente de certificados
@@ -158,7 +159,7 @@ Tests: `tests/test_inspection.py` (por HTTP), goldens `inspect_*`.
 
 | Entrada | Salida | Errores (HTTP) |
 |---------|--------|----------------|
-| `pdf` (bytes), `VerificationOptions` | `VerificationReport` | `UnprocessableInput` (422): con conexión y hora declarada (V-04). `UnprocessablePdf` (422): el PDF no tiene firmas (V-10). Valores de opciones desconocidos: 422 de FastAPI. |
+| `pdf` (bytes), `VerificationOptions` | `VerificationReport` | `UnprocessableInput` (422): con conexión y hora declarada (V-04). `UnprocessablePdf` (422): no es un PDF, está dañado o pide contraseña (D-03, en el adaptador), o no tiene firmas (V-10). Valores de opciones desconocidos: 422 de FastAPI. |
 
 `trust_roots(snapshot=None)` devuelve las anclas (V-01). `verify` lo usa con el snapshot que ya tomó, así anclas e intermedios salen del mismo estado de la fuente (F-05).
 
@@ -213,6 +214,18 @@ La hora declarada sólo se lee si se pidió validar a esa hora.
 En `trust_problem.paths`, cada eslabón se muestra con su CN (o el nombre completo si no tiene), su vencimiento y su huella: una CA renovada tiene el mismo nombre en los dos caminos.
 
 Tests: `tests/test_verify_signatures.py` (con un validador falso), `tests/test_verify.py`, `tests/test_verify_online.py` y `tests/test_store.py` (por HTTP), goldens `verify_*`.
+
+## `AnalyzeDocument`: el análisis del documento
+
+`application/use_cases/analyze_document.py`. Lee los hechos del PDF con el [`PdfInspector`](puertos.md#pdfinspector) y los interpreta con `domain/document.py::analyze` (reglas D-01 a D-10, [dominio.md](dominio.md#documento-domaindocumentpy)): protección, formulario, revisiones, contenido activo, estructura y diccionarios de firma. No valida firmas, así que acepta cualquier PDF, firmado o no. Bloquea por el parseo: el router lo corre en el threadpool.
+
+| Entrada | Salida | Errores (HTTP) |
+|---------|--------|----------------|
+| `pdf` (bytes) | `DocumentAnalysis`: los hechos, el veredicto de cada revisión y los hallazgos | `UnprocessablePdf` (422): no es un PDF, está dañado o pide contraseña (D-03). Una sección que no se puede leer no es un error: es un hallazgo (D-10). |
+
+`adapters/inbound/http/document.py::present_document` arma el JSON: `summary` (hallazgos por severidad), `findings`, `structure`, `protection` (con los permisos decodificados), `form`, `active_content`, `revisions` (con cada objeto) y `signature_dictionaries`. Campo por campo en [pdf.md](../pdf.md#13-el-análisis-del-documento-en-esta-api).
+
+Tests: `tests/test_analyze_document.py` (con un inspector falso), `tests/test_document.py` (por HTTP), goldens `document_b_lta`, `document_open_password`.
 
 ## `SignPdf`: firmar un PDF
 

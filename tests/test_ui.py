@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-FIRMAS_SCRIPTS = ["ui.js", "certificates.js", "verify.js", "inspect.js", "firmas.js"]
+FIRMAS_SCRIPTS = ["ui.js", "certificates.js", "verify.js", "document.js", "inspect.js", "firmas.js"]
 CERTIFICADO_SCRIPTS = ["ui.js", "inspect.js", "certificado.js"]
 FUENTE_SCRIPTS = ["ui.js", "inspect.js", "fuente.js"]
 
@@ -34,10 +34,10 @@ def test_nav_links_the_pages_in_the_same_tab(client, page):
     assert f'href="/ui/{page}" aria-current="page"' in nav
 
 
-def test_firmas_has_one_pdf_upload_and_three_tabs(client):
+def test_firmas_has_one_pdf_upload_and_four_tabs(client):
     html = client.get("/ui/firmas").text
-    assert re.findall(r'role="tab" id="tab-(\w+)"', html) == ["certificados", "verificacion", "inspeccion"]
-    assert html.count('role="tabpanel"') == 3
+    assert re.findall(r'role="tab" id="tab-(\w+)"', html) == ["certificados", "verificacion", "documento", "inspeccion"]
+    assert html.count('role="tabpanel"') == 4
     assert html.count('type="file"') == 1  # sólo el PDF: el certificado suelto va en /ui/certificado
 
 
@@ -60,9 +60,9 @@ def test_assets_are_served(client, asset):
     assert again.status_code == 304
 
 
-def test_firmas_calls_the_three_endpoints(client):
+def test_firmas_calls_the_four_endpoints(client):
     js = client.get("/ui/static/firmas.js").text
-    for endpoint in ("/certificates", "/verify", "/certificates/inspect"):
+    for endpoint in ("/certificates", "/verify", "/document", "/certificates/inspect"):
         assert f'postForm("{endpoint}"' in js
 
 

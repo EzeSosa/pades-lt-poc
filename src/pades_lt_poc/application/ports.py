@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Protocol
 
 from ..domain.certificates import Certificate, CertificateDetails
+from ..domain.document import DocumentFacts
 from ..domain.signatures import SignatureKind, SignedDocument
 from ..domain.signing import SignatureSpec
 from ..domain.source import EntryChanges, NewEntry, SeedCertificate, StoredCertificate
@@ -59,6 +60,23 @@ class SignedPdfReader(Protocol):
         """Las firmas de `pdf`, con sus certificados y su integridad, y los certificados del DSS.
 
         Lanza `UnprocessablePdf("El PDF no tiene firmas")` si no tiene ninguna.
+        """
+        ...
+
+
+class PdfInspector(Protocol):
+    """Lee la estructura de un PDF: protección, formulario, revisiones, contenido activo y diccionarios de firma.
+
+    No valida firmas ni opina: los hechos los interpreta el dominio (`domain/document.py::analyze`).
+    Bloquea sólo por el parseo del PDF.
+    """
+
+    def inspect(self, pdf: bytes) -> DocumentFacts:
+        """Los hechos de `pdf`, tenga o no firmas.
+
+        Lanza `UnprocessablePdf` si no es un PDF que se pueda leer, o si hace falta una contraseña
+        (o un certificado) para abrirlo (D-03). Una sección que no se pueda leer no lanza: queda en
+        `unreadable` y las demás se leen igual (D-10).
         """
         ...
 

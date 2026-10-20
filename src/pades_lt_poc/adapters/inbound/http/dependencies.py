@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from ....application.ports import Clock
+from ....application.use_cases.analyze_document import AnalyzeDocument
 from ....application.use_cases.certificate_chains import ExtractCertificateChains
 from ....application.use_cases.certificate_source import CertificateSource
 from ....application.use_cases.inspect_certificates import InspectCertificates
@@ -28,6 +29,10 @@ def get_verify_signatures(request: Request) -> VerifySignatures:
     return services(request).verify_signatures
 
 
+def get_analyze_document(request: Request) -> AnalyzeDocument:
+    return services(request).analyze_document
+
+
 def get_extract_chains(request: Request) -> ExtractCertificateChains:
     return services(request).extract_chains
 
@@ -46,6 +51,7 @@ def get_clock(request: Request) -> Clock:
 
 SignPdfDep = Annotated[SignPdf, Depends(get_sign_pdf)]
 VerifySignaturesDep = Annotated[VerifySignatures, Depends(get_verify_signatures)]
+AnalyzeDocumentDep = Annotated[AnalyzeDocument, Depends(get_analyze_document)]
 ExtractCertificateChainsDep = Annotated[ExtractCertificateChains, Depends(get_extract_chains)]
 InspectCertificatesDep = Annotated[InspectCertificates, Depends(get_inspect_certificates)]
 CertificateSourceDep = Annotated[CertificateSource, Depends(get_certificate_source)]

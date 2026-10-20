@@ -13,10 +13,10 @@ uv run lint-imports                # sólo las reglas de dependencias
 
 | Capa | Cómo se prueba | Archivos |
 |------|----------------|----------|
-| Dominio | Puro: certificados y firmas armados a mano, sin PKI, sin PDFs, sin red. Cada regla (F, V, C, S) tiene su test, citado en [invariantes.md](invariantes.md). | `test_domain_certificates.py`, `test_domain_source.py`, `test_domain_chains.py`, `test_domain_verification.py`, `test_domain_signing.py` |
-| Casos de uso | Con fakes de los puertos (`tests/fakes.py` y los definidos en cada test): qué piden a los puertos, en qué orden y cómo arman el resultado. | `test_certificate_source.py`, `test_extract_chains.py`, `test_verify_signatures.py`, `test_domain_signing.py` (`SignPdf`) |
+| Dominio | Puro: certificados y firmas armados a mano, sin PKI, sin PDFs, sin red. Cada regla (F, V, D, C, S) tiene su test, citado en [invariantes.md](invariantes.md). | `test_domain_certificates.py`, `test_domain_source.py`, `test_domain_chains.py`, `test_domain_verification.py`, `test_domain_document.py`, `test_domain_signing.py` |
+| Casos de uso | Con fakes de los puertos (`tests/fakes.py` y los definidos en cada test): qué piden a los puertos, en qué orden y cómo arman el resultado. | `test_certificate_source.py`, `test_extract_chains.py`, `test_verify_signatures.py`, `test_analyze_document.py`, `test_domain_signing.py` (`SignPdf`) |
 | Adaptadores de salida | Contra la biblioteca real. Un puerto con un fake tiene un test de contrato que corre contra los dos (`test_certificate_repository.py`: SQLite y memoria). | `test_codec.py`, `test_certificate_repository.py`, `test_issuer_fetcher.py`, `test_crl_index.py` |
-| API (de punta a punta) | Por HTTP con el `TestClient`, con PDFs firmados en el test con la PKI de prueba. | `test_sign.py`, `test_verify.py`, `test_verify_online.py`, `test_certificates.py`, `test_inspection.py`, `test_store.py`, `test_ui.py` |
+| API (de punta a punta) | Por HTTP con el `TestClient`, con PDFs firmados en el test con la PKI de prueba. | `test_sign.py`, `test_verify.py`, `test_verify_online.py`, `test_document.py`, `test_certificates.py`, `test_inspection.py`, `test_store.py`, `test_ui.py` |
 
 ## La app de los tests (`tests/conftest.py`)
 
@@ -46,6 +46,7 @@ Y funciones: `load_signer(chain)` (el firmante de la PKI de prueba, embebiendo s
 | `InMemoryCertificateRepository` | `CertificateRepository` | Un dict bajo un lock; valida antes de escribir (atómico) y repite la restricción "sólo raíces confiables" de la base. Cuenta las lecturas (`reads`). |
 | `FixedClock` | `Clock` | Una hora fija que se mueve con `advance()`. |
 | `StaticSeedCatalog` | `SeedCatalog` | Una lista fija. |
+| `FixedPdfInspector` | `PdfInspector` | Siempre los mismos hechos (por defecto, vacíos), o lanza el error que se le dé. Registra qué PDFs se inspeccionaron. |
 
 Los de un solo test (`FakeReader`, `FakeFetcher`, `FakeValidator`, `FakeEngine`) están en el test que los usa.
 
@@ -53,7 +54,7 @@ Los de un solo test (`FakeReader`, `FakeFetcher`, `FakeValidator`, `FakeEngine`)
 
 | Red | Qué fija | Archivos |
 |-----|----------|----------|
-| **Contrato** | La respuesta JSON completa de cada endpoint en los casos clave, contra `tests/golden/`. Antes de comparar se normaliza lo que cambia en cada corrida: huellas, seriales, DER y key ids de la PKI de prueba (por nombres estables como `<sha256:signer>`), horas, UUIDs, ids, el puerto, el orden de lo descargado en paralelo y la vigencia de la carga inicial (depende del calendario). | `test_contract.py`, `golden/*.json` |
+| **Contrato** | La respuesta JSON completa de cada endpoint en los casos clave, contra `tests/golden/`. Antes de comparar se normaliza lo que cambia en cada corrida: huellas, seriales, DER y key ids de la PKI de prueba (por nombres estables como `<sha256:signer>`), horas (también las fechas PDF de `/M`), UUIDs, ids, el puerto, el orden de lo descargado en paralelo, la vigencia de la carga inicial (depende del calendario) y, del análisis del documento, los offsets y tamaños en bytes, las claves VRI y el `/ModDate` (cambia sólo si pasó un segundo entre revisiones). | `test_contract.py`, `golden/*.json` |
 | **Suite de PDFs** | Los 40 casos de `testdata/pdf-suite` contra `/sign` y `/verify`, con el canario que detecta estado compartido entre pedidos (marca `suite`). | `test_pdf_suite.py` |
 | **Arquitectura** | Las reglas de dependencias entre capas (import-linter) y que sólo `config.py` lea el entorno. | `test_architecture.py` |
 | **Documentación** | Que cada test y golden citado en `docs/arquitectura` exista. | `test_docs.py` |

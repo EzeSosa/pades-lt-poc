@@ -1,0 +1,385 @@
+{
+  "status": 200,
+  "body": {
+    "summary": {
+      "info": 1,
+      "warning": 0,
+      "critical": 0
+    },
+    "findings": [
+      {
+        "code": "unsigned_last_revision",
+        "severity": "info",
+        "area": "content",
+        "message": "La última revisión (4) no está firmada: agrega sólo material de mantenimiento (DSS, firmas, metadatos), que no cambia lo que se ve."
+      }
+    ],
+    "structure": {
+      "version": "1.7",
+      "header_version": "1.7",
+      "catalog_version": null,
+      "pages": 1,
+      "revisions": 4,
+      "hybrid_xref": false,
+      "object_streams": false,
+      "linearized": false,
+      "tagged": false,
+      "pdfa": null,
+      "producer": "pyHanko 0.37.0",
+      "creator": null,
+      "trailing_bytes": 0,
+      "extensions": [
+        "ESIC 1"
+      ]
+    },
+    "protection": {
+      "encryption": null,
+      "certification": null,
+      "field_locks": [],
+      "usage_rights": false
+    },
+    "form": {
+      "need_appearances": false,
+      "xfa": false,
+      "fields": [
+        {
+          "name": "Firma1",
+          "type": "signature",
+          "value": null,
+          "read_only": false,
+          "required": false,
+          "signed": true,
+          "actions": false
+        },
+        {
+          "name": "Timestamp-<uuid>",
+          "type": "signature",
+          "value": null,
+          "read_only": false,
+          "required": false,
+          "signed": true,
+          "actions": false
+        }
+      ]
+    },
+    "active_content": {
+      "actions": [],
+      "embedded_files": [],
+      "optional_content": null
+    },
+    "revisions": [
+      {
+        "number": 1,
+        "end_offset": "<end_offset>",
+        "xref": "table",
+        "objects": 5,
+        "pages": 1,
+        "signed_by": [],
+        "after_signature": false,
+        "severity": "info",
+        "changes": []
+      },
+      {
+        "number": 2,
+        "end_offset": "<end_offset>",
+        "xref": "table",
+        "objects": 6,
+        "pages": 1,
+        "signed_by": [
+          "Firma1"
+        ],
+        "after_signature": false,
+        "severity": "info",
+        "changes": [
+          {
+            "object": "1 0",
+            "kind": "catalog",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": [
+              "/AcroForm",
+              "/Extensions"
+            ]
+          },
+          {
+            "object": "3 0",
+            "kind": "page",
+            "change": "modified",
+            "page": 1,
+            "subtype": null,
+            "keys": [
+              "/Annots"
+            ]
+          },
+          {
+            "object": "7 0",
+            "kind": "acroform",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "8 0",
+            "kind": "signature",
+            "change": "added",
+            "page": 1,
+            "subtype": "/Widget",
+            "keys": []
+          },
+          {
+            "object": "9 0",
+            "kind": "signature",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "10 0",
+            "kind": "metadata",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          }
+        ]
+      },
+      {
+        "number": 3,
+        "end_offset": "<end_offset>",
+        "xref": "table",
+        "objects": 16,
+        "pages": 1,
+        "signed_by": [
+          "Timestamp-<uuid>"
+        ],
+        "after_signature": true,
+        "severity": "info",
+        "changes": [
+          {
+            "object": "1 0",
+            "kind": "catalog",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": [
+              "/DSS"
+            ]
+          },
+          {
+            "object": "3 0",
+            "kind": "page",
+            "change": "modified",
+            "page": 1,
+            "subtype": null,
+            "keys": [
+              "/Annots"
+            ]
+          },
+          {
+            "object": "7 0",
+            "kind": "acroform",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": [
+              "/Fields"
+            ]
+          },
+          {
+            "object": "10 0",
+            "kind": "metadata",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "12 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "13 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "14 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "15 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "16 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "17 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "18 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "19 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "20 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "21 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "22 0",
+            "kind": "signature",
+            "change": "added",
+            "page": 1,
+            "subtype": "/Widget",
+            "keys": []
+          },
+          {
+            "object": "23 0",
+            "kind": "signature",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          }
+        ]
+      },
+      {
+        "number": 4,
+        "end_offset": "<end_offset>",
+        "xref": "table",
+        "objects": 3,
+        "pages": 1,
+        "signed_by": [],
+        "after_signature": true,
+        "severity": "info",
+        "changes": [
+          {
+            "object": "10 0",
+            "kind": "metadata",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          },
+          {
+            "object": "21 0",
+            "kind": "dss",
+            "change": "modified",
+            "page": null,
+            "subtype": null,
+            "keys": [
+              "/VRI/<vri>"
+            ]
+          },
+          {
+            "object": "25 0",
+            "kind": "dss",
+            "change": "added",
+            "page": null,
+            "subtype": null,
+            "keys": []
+          }
+        ]
+      }
+    ],
+    "signature_dictionaries": [
+      {
+        "field": "Firma1",
+        "type": "/Sig",
+        "filter": "/Adobe.PPKLite",
+        "subfilter": "/ETSI.CAdES.detached",
+        "byte_range": "<byte_range>",
+        "byte_range_regular": true,
+        "covers_revision": true,
+        "revision": 2,
+        "contents": {
+          "capacity": "<capacity>",
+          "used": "<used>"
+        },
+        "signing_time": "<time>",
+        "name": null,
+        "reason": "Conformidad",
+        "location": "Buenos Aires, AR",
+        "contact_info": null,
+        "application": null,
+        "references": [],
+        "visible": false,
+        "page": 1
+      },
+      {
+        "field": "Timestamp-<uuid>",
+        "type": "/DocTimeStamp",
+        "filter": "/Adobe.PPKLite",
+        "subfilter": "/ETSI.RFC3161",
+        "byte_range": "<byte_range>",
+        "byte_range_regular": true,
+        "covers_revision": true,
+        "revision": 3,
+        "contents": {
+          "capacity": "<capacity>",
+          "used": "<used>"
+        },
+        "signing_time": null,
+        "name": null,
+        "reason": null,
+        "location": null,
+        "contact_info": null,
+        "application": null,
+        "references": [],
+        "visible": false,
+        "page": 1
+      }
+    ]
+  }
+}

@@ -2,6 +2,8 @@
 
 Este documento explica cómo funciona una firma PAdES y define cada concepto que aparece en la PoC: desde la criptografía de base hasta la estructura interna del PDF firmado. Cada sección termina indicando **dónde aparece el concepto en el código**.
 
+El formato PDF en sí (objetos, xref, revisiones, formularios, cifrado, certificación, cómo se firma de forma incremental, ataques conocidos) y el análisis del documento que hace `/document` están en [pdf.md](pdf.md).
+
 Índice:
 
 1. [Visión general](#1-visión-general)
@@ -47,7 +49,7 @@ Esta PoC levanta **todas las piezas de infraestructura** en una sola app FastAPI
 
 Al firmar, la app **se consulta a sí misma** por HTTP como si la TSA, el OCSP y las CRLs fueran servicios externos. Por eso `PUBLIC_BASE_URL` tiene que ser alcanzable desde el propio proceso.
 
-Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se sube el PDF una vez y tres tabs muestran lo que devuelven `POST /certificates`, `POST /verify` y `POST /certificates/inspect`. Un certificado suelto se inspecciona aparte, en `/ui/certificado`, y la fuente de certificados se administra en `/ui/fuente`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
+Además sirve una UI web (`/ui/firmas`, ver el [README](../README.md#ui)): se sube el PDF una vez y cuatro tabs muestran lo que devuelven `POST /certificates`, `POST /verify`, `POST /document` y `POST /certificates/inspect`. Un certificado suelto se inspecciona aparte, en `/ui/certificado`, y la fuente de certificados se administra en `/ui/fuente`. Son páginas estáticas que llaman a esos endpoints desde el navegador y no agregan lógica: todo lo que muestran sale de las respuestas descriptas en la [sección 10](#10-flujo-de-verify-e-interpretación-del-resultado).
 
 ---
 
@@ -322,7 +324,7 @@ Validar un sello implica validar la firma de la TSA y su cadena (incluida la rev
 
 ### Estructura de un PDF
 
-Un PDF es una colección de **objetos** numerados (diccionarios, streams, arrays…), una **tabla de referencias cruzadas** (`xref`) que indica en qué byte empieza cada objeto, y un **trailer** que apunta al objeto raíz (el **catálogo**, `/Root`).
+Un PDF es una colección de **objetos** numerados (diccionarios, streams, arrays…), una **tabla de referencias cruzadas** (`xref`) que indica en qué byte empieza cada objeto, y un **trailer** que apunta al objeto raíz (el **catálogo**, `/Root`). El detalle, con ejemplos de bytes reales, está en [pdf.md](pdf.md#2-sintaxis-los-objetos).
 
 ### Actualización incremental y revisiones
 

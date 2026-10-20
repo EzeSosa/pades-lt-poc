@@ -34,6 +34,8 @@ class VerifySignatures:
     PDF deja de contar como LT por sí mismo.
 
     La fuente se lee en cada verificación (un snapshot), así que un cambio del ABM aplica enseguida.
+
+    El análisis del documento (protección, formulario, revisiones) es otro caso de uso: `AnalyzeDocument`.
     """
 
     def __init__(

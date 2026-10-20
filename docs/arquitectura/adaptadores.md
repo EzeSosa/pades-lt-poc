@@ -79,7 +79,7 @@ Tests: `tests/test_inspection.py`, goldens `inspect_*`.
 
 Implementa [`SignedPdfReader`](puertos.md#signedpdfreader) con `PyHankoSignedPdfReader(codec)`.
 
-- **Apertura**: `open_signed_pdf` abre el PDF con `PdfFileReader(strict=False)` (muchos PDFs reales tienen errores menores) y rechaza los que no tienen firmas. La usa también la verificación, que todavía no se migró.
+- **Apertura**: `open_pdf` abre el PDF con `PdfFileReader(strict=False)` (muchos PDFs reales tienen errores menores), rechaza lo que no se puede leer y, si está cifrado, se autentica con la contraseña vacía: un PDF que pide contraseña de apertura, o cifrado para certificados, es un `UnprocessablePdf` (D-03). `open_signed_pdf` además rechaza los que no tienen firmas (V-10). Las usan también el validador y el `PdfInspector`.
 - **Integridad** (`check_integrity`): con `validate_sig_integrity` de pyHanko. Para un TSTInfo (DocTimeStamp o sello de una firma), los atributos firmados cubren el TSTInfo y aparte se compara su `messageImprint` con lo que el sello dice cubrir (`covered_digest`): el ByteRange (`sig.compute_digest`) o el valor de la firma (`message_imprint_checker`). Un `SignatureValidationError` (p. ej. el firmante no está en el CMS) se devuelve como `Integrity(False, False, mensaje)`.
 - **Certificados**: `extract_certs_for_validation` separa al firmante de los demás. Cada certificado de `asn1crypto` se convierte con el `CertificateCodec`, una vez por lectura (el mismo suele estar en el CMS, en el sello y en el DSS).
 - **Sello de una firma**: el primer token RFC 3161 de los atributos no firmados (`extract_tst_data_iter`), con su `genTime`.
@@ -106,7 +106,8 @@ Implementa [`SignatureValidator`](puertos.md#signaturevalidator). Ningún tipo d
 | `fetching.py` | Los fetchers de CRL, OCSP y AIA para el modo con conexión, con timeouts que no tiran abajo la verificación y el caché de CRLs (`CrlCache`). |
 | `crl_index.py` | Un índice de seriales por CRL que reemplaza la búsqueda de pyhanko-certvalidator (CRLs grandes). |
 | `convert.py` | asn1crypto ↔ `Certificate`. |
-| `signed_pdf_reader.py` | El lector de PDFs firmados (paso 4); `open_signed_pdf` lo usa también el validador. |
+| `signed_pdf_reader.py` | El lector de PDFs firmados (paso 4); `open_pdf` y `open_signed_pdf` los usan también el validador y el inspector. |
+| `document_inspector.py` | El `PdfInspector`: los hechos del documento (ver abajo). |
 | `signer.py` | El motor de firma (paso 6). |
 
 ### El `ValidationContext` de cada firma
@@ -157,6 +158,19 @@ Timeouts: 10 s por OCSP o AIA y 60 s por CRL (la de la AC ONTI pesa ~9 MB). Las 
 pyhanko-certvalidator busca un serial recorriendo la CRL con asn1crypto, entrada por entrada: con la CRL de la AC ONTI (~240 mil entradas) cada búsqueda tarda ~2 s. `install()` reemplaza esa función (`validate_crl.find_cert_in_list`) por una que consulta primero un índice de seriales armado con `cryptography` (~0,15 s por CRL, cacheado por huella, hasta 16). Si el serial no está, responde enseguida; si está, o la CRL es indirecta, delega en la original. Es un parche global al proceso: lo instala `bootstrap.build`, una vez.
 
 Tests: `tests/test_verify.py`, `tests/test_verify_online.py`, `tests/test_crl_index.py`, `tests/test_store.py` y la suite de PDFs (por HTTP y con PDFs reales), goldens `verify_*`.
+
+## `adapters/outbound/pyhanko/document_inspector.py`: el documento con pyHanko
+
+Implementa [`PdfInspector`](puertos.md#pdfinspector) con `PyHankoPdfInspector`. Lee los objetos con el lector de pyHanko, sin validar nada, y los traduce a los modelos de [`domain/document.py`](dominio.md#documento-domaindocumentpy). Los conceptos de PDF están en [pdf.md](../pdf.md).
+
+- **Secciones independientes** (D-10): estructura, protección, formulario, contenido activo, revisiones y diccionarios de firma se leen cada una dentro de `section(...)`. Si una lanza, queda `None` (o vacía) con el motivo en `unreadable`, y las demás se leen igual.
+- **Fin de cada revisión**: el `%%EOF` (con su fin de línea) que sigue a la xref de la revisión, según `xrefs.get_xref_container_info`. Lo que queda después del último es `trailing_bytes`.
+- **Revisiones** (D-05): por cada revisión, `xrefs.explicit_refs_in_revision` (lo escrito) y `refs_freed_in_revision` (lo liberado). El rol de cada objeto lo da `_Roles`, que recorre la vista histórica de esa revisión (`get_historical_resolver`): catálogo, árbol de páginas, cada página con su `/Contents`, `/Resources` y `/Annots` (widgets de firma, de otros campos o anotaciones), `/AcroForm` y sus campos, DSS, XMP, adjuntos, JavaScript y `/OpenAction`. Lo que no tiene rol se clasifica por su `/Type`. Un objeto liberado toma el rol que tenía en la revisión anterior; si nunca existió (las entradas libres de iText), es estructura. De un diccionario modificado se informan las claves que cambiaron, bajando un nivel en los diccionarios directos (`/AcroForm/NeedAppearances`).
+- **Otro lector para las revisiones**: la vista histórica de pyHanko falla con objetos que el lector principal ya decodificó (p. ej. el XMP que leyó la estructura), así que las revisiones se leen con un `PdfFileReader` propio.
+- **Cifrado**: algoritmo según el *crypt filter* (`/CFM`: `/AESV3`, `/AESV2`, `/V2`) o la versión (`/V`), bits, `/R` y `/P` (decodificado por el dominio, D-01). El `/Contents` de cada firma se lee crudo (`EncryptedObjAccess.RAW`): nunca está cifrado.
+- **Diccionarios de firma**: ByteRange, si su hueco es exactamente el string hexadecimal de `/Contents`, el espacio reservado y el que ocupa el CMS (el largo de su DER), y la revisión que firma (`signed_revision`) con su fin.
+
+Tests: `tests/test_document.py` (por `/document`, con PDFs armados en el test y casos de la suite), golden `document_b_lta`.
 
 ## `adapters/outbound/pyhanko/signer.py`: la firma con pyHanko
 

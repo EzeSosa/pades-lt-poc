@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+from pades_lt_poc.domain.document import DocumentFacts
 from pades_lt_poc.domain.source import EntryChanges, NewEntry, SeedCertificate, StoredCertificate
 
 
@@ -25,6 +26,23 @@ class FixedClock:
 
     def advance(self, **delta) -> None:
         self.moment += timedelta(**delta)
+
+
+class FixedPdfInspector:
+    """`PdfInspector` que devuelve siempre los mismos hechos, o lanza `error` si se lo da."""
+
+    EMPTY = DocumentFacts(structure=None, protection=None, form=None, active_content=None, revisions=(), signatures=())
+
+    def __init__(self, facts: DocumentFacts = EMPTY, error: Exception | None = None) -> None:
+        self.facts = facts
+        self.error = error
+        self.inspected: list[bytes] = []
+
+    def inspect(self, pdf: bytes) -> DocumentFacts:
+        self.inspected.append(pdf)
+        if self.error:
+            raise self.error
+        return self.facts
 
 
 class StaticSeedCatalog:

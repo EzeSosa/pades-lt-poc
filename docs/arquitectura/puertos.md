@@ -8,6 +8,7 @@ Cada puerto documenta su **contrato**: qué recibe, qué devuelve, qué errores 
 |--------|------------------|--------|
 | [`CertificateCodec`](#certificatecodec) | `CryptographyCertificateCodec` | `CertificateSource`, `ExtractCertificateChains`, `InspectCertificates`, `SqliteCertificateRepository`, `PyHankoSignedPdfReader` |
 | [`SignedPdfReader`](#signedpdfreader) | `PyHankoSignedPdfReader`; `FakeReader` (tests) | `ExtractCertificateChains` |
+| [`PdfInspector`](#pdfinspector) | `PyHankoPdfInspector`; `FixedPdfInspector` (tests) | `AnalyzeDocument` |
 | [`IssuerFetcher`](#issuerfetcher) | `HttpIssuerFetcher`; `FakeFetcher` (tests) | `ExtractCertificateChains` |
 | [`SignatureValidator`](#signaturevalidator) | `PyHankoSignatureValidator`; `FakeValidator` (tests) | `VerifySignatures` |
 | [`PdfSigningEngine`](#pdfsigningengine) | `PyHankoPdfSigner`; `FakeEngine` (tests) | `SignPdf` |
@@ -109,6 +110,22 @@ Qué cubre la integridad de cada firma:
 | Sello de una firma | El `messageImprint` coincide con el hash del **valor de la firma**. |
 
 `valid` es que la firma verifique con la clave del firmante, en los tres casos.
+
+## `PdfInspector`
+
+Lee la **estructura** de un PDF, tenga o no firmas: protección, formulario, revisiones (con cada objeto escrito o liberado), contenido activo, estructura del archivo y diccionarios de firma. Devuelve un [`DocumentFacts`](dominio.md#documento-domaindocumentpy) sin opinar: qué es riesgoso lo decide el dominio (`analyze`).
+
+**Propiedades**: sin E/S de red. Bloquea por el parseo del PDF, proporcional a la cantidad de páginas y de revisiones.
+
+### `inspect(pdf: bytes) -> DocumentFacts`
+
+| Situación | Resultado |
+|-----------|-----------|
+| El PDF se puede leer | Los hechos de cada sección. Un PDF sin formulario tiene `form = None`. |
+| Está cifrado sólo con clave de propietario | Se lee igual (se autentica con la contraseña vacía), y `protection.encryption` lo describe. |
+| No es un PDF, o está dañado | `UnprocessablePdf("No es un PDF válido o está dañado: …")` |
+| Pide contraseña de apertura, o está cifrado para certificados | `UnprocessablePdf` con el motivo (D-03). |
+| Una sección no se puede leer | No es una excepción: esa sección queda en `None` (o vacía) y el motivo en `unreadable` (D-10). |
 
 ## `IssuerFetcher`
 

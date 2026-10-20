@@ -42,7 +42,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from . import bootstrap
 from .application.ports import Clock, IssuerFetcher
 from .config import Settings
-from .adapters.inbound.http import certificates, signing, store, ui, verification
+from .adapters.inbound.http import certificates, document, signing, store, ui, verification
 from .testbed import Testbed
 from .testbed.http import create_router as testbed_router
 from .domain.errors import UnprocessableInput
@@ -67,7 +67,7 @@ def create_app(
 
     app = FastAPI(title="PoC PAdES B-LT", lifespan=lifespan)
     app.include_router(testbed_router(_testbed))  # /pki, /ocsp y /tsa: el mundo externo simulado
-    for module in (signing, verification, certificates, store, ui):
+    for module in (signing, verification, document, certificates, store, ui):
         app.include_router(module.router)
     app.mount("/ui/static", ui.RevalidatedStaticFiles(directory=ui.STATIC_DIR), name="ui-static")
 

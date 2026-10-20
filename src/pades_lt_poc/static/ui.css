@@ -153,6 +153,11 @@ details .chain { border-top: 1px solid var(--line-soft); background: var(--surfa
 .paths .mono { overflow-wrap: anywhere; }
 .path-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .path-chain { font-weight: 500; overflow-wrap: anywhere; }
+/* Sección Documento (tab Verificación): hallazgos y objetos de cada revisión. */
+.findings { border-top: 0; border-bottom: 1px solid var(--line-soft); }
+.findings .path-chain { font-weight: 400; flex: 1 1 420px; }
+.changes { list-style: none; margin: 0; padding: 0 0 0 106px; display: flex; flex-direction: column; gap: 2px; }
+.changes .mono { color: var(--ink); }
 /* Modo de revocación (tab Verificación): qué hace y, con conexión, qué se descargó. */
 .revocation-note { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--muted); }
 .revocation-note.used { color: var(--warn-fg); background: var(--warn-bg); padding: 8px 12px; border-radius: 8px; }
@@ -218,6 +223,7 @@ form.notes-form { padding: 0; border: 0; background: transparent; align-items: f
   .cert-sources { grid-template-columns: minmax(0, 1fr); }
   .or { justify-self: center; padding-top: 0; }
   .meta { padding-left: 0; }
+  .changes { padding-left: 0; }
   .role { width: auto; }
   .facts { grid-template-columns: minmax(0, 1fr); }
   .facts dt { padding-bottom: 0; }

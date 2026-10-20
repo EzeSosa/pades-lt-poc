@@ -1,12 +1,13 @@
-// /ui/firmas: un PDF, tres tabs. Al elegir el PDF se piden /certificates y /verify en
-// paralelo; cada tab vuelve a pedir lo suyo si cambian sus opciones, con el mismo PDF.
+// /ui/firmas: un PDF, cuatro tabs. Al elegir el PDF se piden /certificates, /verify y /document
+// en paralelo; cada tab vuelve a pedir lo suyo si cambian sus opciones, con el mismo PDF.
 // El PDF y lo que se estaba mirando (opciones, tab, certificado) se guardan en el
 // navegador y se restauran al volver a la página.
 
-const TABS = ["certificados", "verificacion", "inspeccion"];
+const TABS = ["certificados", "verificacion", "documento", "inspeccion"];
 const EMPTY = {
   certificados: "Subí un PDF firmado para ver la cadena de certificados de cada firma.",
   verificacion: "Subí un PDF firmado para ver el reporte de verificación.",
+  documento: "Subí un PDF para ver el análisis del documento: protección, formulario, revisiones y estructura.",
   inspeccion: "Elegí un certificado del PDF, o tocá «Ver detalle» en la tab Certificados.",
 };
 
@@ -14,7 +15,7 @@ const state = {
   file: null,
   certs: [], // certificados del PDF, sin repetir, para el selector de Inspección
   // Cada pedido lleva un número: si llega la respuesta de uno viejo (cambió el PDF o una opción), se descarta.
-  tickets: { certificados: 0, verificacion: 0, inspeccion: 0 },
+  tickets: { certificados: 0, verificacion: 0, documento: 0, inspeccion: 0 },
   // Lo que se guarda además del PDF ("firmas-pdf"), en "firmas-view".
   view: { tab: "certificados", fetchMissing: true, revocation: "offline", validationTime: "now", diffPolicy: "default", inspected: null },
 };
@@ -147,6 +148,23 @@ function loadVerify() {
   );
 }
 
+// --------------------------------------------------------------------------- Documento
+function loadDocument() {
+  const body = new FormData();
+  body.append("pdf", state.file);
+  setCount("documento", "");
+  return run(
+    "documento",
+    "Analizando el documento…",
+    () => postForm("/document", body),
+    (data) => {
+      out("documento").replaceChildren(renderDocument(state.file.name, data));
+      setCount("documento", documentCount(data));
+    },
+    "No se pudo analizar el PDF",
+  );
+}
+
 // --------------------------------------------------------------------------- Inspección
 function fillPicker() {
   const picker = $("#cert-picker");
@@ -199,6 +217,7 @@ async function usePdf(file, { inspected = null } = {}) {
 
   const certificates = loadCertificates();
   loadVerify();
+  loadDocument();
   await certificates;
   if (inspected && state.certs.some((c) => c.der_b64 === inspected)) inspectFromPdf(inspected, { switchTab: false });
 }

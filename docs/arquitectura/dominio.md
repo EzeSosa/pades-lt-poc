@@ -37,6 +37,12 @@ Cómo se llama cada concepto en la documentación (castellano) y en el código (
 | Campo de firma | `SignatureSpec.field_name` | El campo del formulario donde va la firma (`FirmaN`). |
 | Perfil de firma | `SignatureSpec` | PAdES (`ETSI.CAdES.detached`) con SHA-256, sello de tiempo, DSS y, si se pide, DocTimeStamp. |
 | Detalle legible | `CertificateDetails` | Lo que muestra la inspección: nombres atributo por atributo, clave y extensiones como texto. |
+| Revisión | `Revision` | Una actualización incremental del PDF: los objetos que escribe o libera, y dónde termina. |
+| Cambio | `ObjectChange`, `ChangeKind`, `ChangeType` | Un objeto escrito (`added`, `modified`) o liberado (`freed`) en una revisión, con su rol en el documento. |
+| Hallazgo | `Finding`, `Severity`, `Area` | Algo del documento que conviene saber, con su gravedad: `info`, `warning` o `critical`. |
+| Certificación | `Certification` | La primera firma con DocMDP, que fija qué cambios se aceptan después (P=1, 2 o 3). |
+| Permisos | `Permissions` | Lo que permite el cifrado estándar según `/P`. |
+| Diccionario de firma | `SignatureDictionary` | Una firma tal como está en el PDF: ByteRange, `/Contents`, SubFilter, `/M`, motivo, lugar. |
 
 ## Certificado (`domain/certificates.py`)
 
@@ -245,6 +251,32 @@ Cada camino es un `PathAttempt`: `chain` (hoja → ancla), `reason` (`TrustReaso
 Los textos que ve el usuario (notas, advertencias, resúmenes y sugerencias) son constantes de este módulo.
 
 Tests: `tests/test_domain_verification.py` (puro), `tests/test_verify_signatures.py` (caso de uso con un validador falso).
+
+## Documento (`domain/document.py`)
+
+El PDF más allá de sus firmas, para `AnalyzeDocument` (`/document`). El adaptador (`PdfInspector`) lee los hechos (`DocumentFacts`) y `analyze` los convierte en hallazgos. No cambia el veredicto de las firmas: lo explica. Los conceptos están en [pdf.md](../pdf.md).
+
+| Hecho | Qué tiene |
+|-------|-----------|
+| `Structure` | Versión de la cabecera y del catálogo (`version` es la mayor), páginas, xref híbrida, object streams, linealizado, etiquetado, PDF/A declarado, productor, bytes después del último `%%EOF` (y si son relleno) y extensiones. |
+| `Protection` | `Encryption` (handler, algoritmo, bits, `/V`, `/R`, `Permissions`), `Certification`, los `FieldLock` y los derechos de uso (UR3). |
+| `Form` | Los `FormField` (nombre completo, `FieldKind`, valor, sólo lectura, obligatorio, firmado, acciones), `need_appearances` y `xfa`. |
+| `ActiveContent` | Las `Action` (tipo y dónde), los `EmbeddedFile` y `OptionalContent` (capas y cuántas ocultas). |
+| `Revision` | Número, fin, tipo de xref, objetos, páginas y los `ObjectChange` (rol, `ChangeType`, página, `/Subtype`, claves cambiadas). |
+| `SignatureDictionary` | Cada firma y sello: ByteRange, revisión que firma y su fin, si el hueco es `/Contents`, espacio reservado y usado, `/M`, motivo, lugar, programa, transformaciones, visibilidad y página. `byte_range_regular` y `covers_revision` aplican D-08. |
+| `unreadable` | (sección, motivo) de lo que no se pudo leer (D-10). |
+
+| Función | Qué decide |
+|---------|------------|
+| `Permissions.from_flags(p)` | D-01: los permisos según los bits de `/P`; `signing_allowed` y `denied()`. |
+| `classify_change(cambio)` | D-05: el riesgo de un objeto escrito o liberado después de firmar, por su rol (tabla en [pdf.md](../pdf.md#cómo-se-juzga-cada-revisión-d-05)). |
+| `revision_severity(cambios)` | D-05: el del cambio más grave. |
+| `revision_verdicts(revisiones, firmas)` | D-05: cada revisión con las firmas que la cierran, si es posterior a la primera firma (no a un sello de documento) y su riesgo (`RevisionVerdict`). |
+| `analyze(hechos)` | Todos los hallazgos (D-01 a D-10), ordenados de más a menos grave: `DocumentAnalysis`. |
+
+Los textos de los hallazgos son de este módulo. Cada uno tiene un `code` estable (`content_changed_after_signing`, `need_appearances`, `irregular_byte_range`, ...), un `area` y un `message`.
+
+Tests: `tests/test_domain_document.py` (puro), `tests/test_document.py` (por HTTP, con el adaptador real).
 
 ## Firma (`domain/signing.py`)
 
